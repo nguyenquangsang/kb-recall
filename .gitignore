@@ -1,0 +1,21 @@
+.vscode
+.claude
+CLAUDE.local.md
+__pycache__/
+
+# Build outputs. These are the entries that actually matter: `dist/`, `build/`
+# and `*.egg-info` are what show up as untracked the moment anyone runs
+# `uv build`.
+dist/
+build/
+*.egg-info/
+
+# Tool caches. uv, pytest and ruff each drop a `.gitignore` containing `*` inside
+# their own directory, so these are already ignored in practice — listed anyway
+# so a contributor reading this file does not need to know that, and so the
+# reasoning is not re-derived from a confusing `git check-ignore` result (which
+# reports the *directories* as not ignored, because only their contents are).
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
