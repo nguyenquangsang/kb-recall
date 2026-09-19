@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Called by publish.yml so a tag push runs the same tests as the PR did,
+  # instead of a second copy of these steps that can drift out of sync.
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor declared in requires-python; the rest guard against
+        # a dependency or syntax change that only breaks on a newer interpreter.
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # --locked, not a bare `uv sync`: the lock file is committed, so CI should
+      # fail loudly on a stale lock rather than silently re-resolving and testing
+      # a different dependency set than the one developers actually run.
+      - name: Install dependencies
+        run: uv sync --locked --python ${{ matrix.python-version }}
+
+      - name: Lint
+        run: uv run ruff check kb_recall tests scripts
+
+      # Checks kb_recall only, not tests/scripts: the shipped package is what
+      # the type declarations have to be true for. Nothing ran mypy before this
+      # step existed, so it sat declared-but-unrun in `[dependency-groups] dev`
+      # and drifted to red while CI stayed green.
+      - name: Type check
+        run: uv run mypy kb_recall
+
+      - name: Test
+        run: uv run pytest -q

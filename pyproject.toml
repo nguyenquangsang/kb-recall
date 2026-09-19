@@ -1,0 +1,79 @@
+[project]
+name = "kb-recall"
+version = "0.1.0"
+description = "MCP server that gives Claude Code persistent, feature-scoped knowledge across sessions"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [
+    # Name only — no email. PyPI metadata is public and permanent, and support
+    # runs through the GitHub issue tracker (listed in [project.urls] below).
+    { name = "nguyenquangsang" },
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "ai",
+    "memory",
+    "knowledge-base",
+]
+classifiers = [
+    # No "License :: OSI Approved :: MIT License" classifier: `license` above is a
+    # PEP 639 SPDX expression, which supersedes the classifier form — listing both
+    # is redundant at best, and rejected by tooling that cross-validates them at worst.
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    # Upper bound is load-bearing, not cosmetic: server.py uses the v1 API
+    # (`mcp.server.fastmcp.FastMCP`). mcp 2.x renamed it to `MCPServer`, so an
+    # install that resolves without this lock file would get 2.x and die at
+    # import — `uv.lock` hides that locally on every dev machine.
+    "mcp[cli]>=1.9.0,<2",
+]
+
+[project.urls]
+Homepage = "https://github.com/nguyenquangsang/kb-recall"
+Repository = "https://github.com/nguyenquangsang/kb-recall"
+Issues = "https://github.com/nguyenquangsang/kb-recall/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kb_recall"]
+
+[tool.hatch.build.targets.sdist]
+# Demo recordings are docs assets, not package data — nothing under `kb_recall/`
+# reads them, and the wheel above never included them. README references them by
+# absolute raw.githubusercontent.com URL (PyPI does not resolve repo-relative
+# paths), so the PyPI page renders without them. Left in, they were 76% of the
+# sdist; excluded, the tarball drops from ~6.4 MB to ~0.66 MB and the GIFs can
+# stay at full quality instead of being compressed for a download almost nobody
+# makes — `pip install` resolves to the wheel.
+exclude = ["/images"]
+
+[project.scripts]
+recall = "kb_recall.cli:main"
+recall-server = "kb_recall.server:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pytest>=8.0.0",
+    "ruff>=0.15.18",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,33 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  # Reuse the workflow that gates every PR rather than keeping a second copy of
+  # the test steps here. A tag push is the one event that cannot be cheaply
+  # redone — once a version is on PyPI it can never be re-uploaded under the same
+  # number — so the tests get re-run on exactly the tagged commit, not assumed
+  # from whatever the branch looked like at review time.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # required for PyPI Trusted Publishing (OIDC), no API token needed
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build package
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
