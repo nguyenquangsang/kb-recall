@@ -76,8 +76,17 @@ def analyze_usage(records):
     # Error rate needs `status` to be meaningful — computed on the with_status
     # subset only, and reported as a fraction of that subset per tool, not of
     # total calls (a legacy call has unknown status, not "ok").
+    #
+    # `status` distinguishes three outcomes: "ok"/"oversized" (success), "error"
+    # (a crash), and "rejected" (a guard refused — correct behaviour, NOT a
+    # failure). They are counted separately: bundling rejections into the error
+    # rate made the only tool whose guards fire (load_feature_context) look like
+    # the only broken one.
     errors_by_tool = Counter(
         r.get("tool", "?") for r in with_status if r.get("status") == "error"
+    )
+    rejected_by_tool = Counter(
+        r.get("tool", "?") for r in with_status if r.get("status") == "rejected"
     )
     status_known_by_tool = Counter(r.get("tool", "?") for r in with_status)
     by_project = Counter(r.get("project", "") for r in with_status)
@@ -88,6 +97,7 @@ def analyze_usage(records):
             durations[r.get("tool", "?")].append(r["duration_ms"])
 
     total_errors = sum(errors_by_tool.values())
+    total_rejected = sum(rejected_by_tool.values())
 
     print("=" * 70)
     print("SOURCE 1: usage.jsonl")
@@ -101,18 +111,28 @@ def analyze_usage(records):
         f"{total_errors}/{len(with_status)} = "
         f"{100 * total_errors / max(1, len(with_status)):.1f}%"
     )
+    print(
+        f"Rejected (guard refused, NOT a failure): "
+        f"{total_rejected}/{len(with_status)} = "
+        f"{100 * total_rejected / max(1, len(with_status)):.1f}%"
+    )
     print()
     print(
-        f"{'tool':<28}{'calls':>8}{'w/status':>10}{'errors':>8}{'err%':>8}{'p50 ms':>10}{'p95 ms':>10}"
+        f"{'tool':<28}{'calls':>8}{'w/status':>10}{'errors':>8}{'err%':>8}"
+        f"{'rejected':>10}{'p50 ms':>10}{'p95 ms':>10}"
     )
     for tool, count in by_tool.most_common():
         known = status_known_by_tool.get(tool, 0)
         errs = errors_by_tool.get(tool, 0)
+        rejects = rejected_by_tool.get(tool, 0)
         ds = sorted(durations.get(tool, []))
         p50 = ds[len(ds) // 2] if ds else 0
         p95 = ds[int(len(ds) * 0.95)] if ds else 0
         err_pct = f"{100 * errs / known:.1f}%" if known else "n/a"
-        print(f"{tool:<28}{count:>8}{known:>10}{errs:>8}{err_pct:>8}{p50:>10}{p95:>10}")
+        print(
+            f"{tool:<28}{count:>8}{known:>10}{errs:>8}{err_pct:>8}"
+            f"{rejects:>10}{p50:>10}{p95:>10}"
+        )
     print()
     print("By project (status-known records only):")
     for proj, count in by_project.most_common():
@@ -214,12 +234,20 @@ def scan_transcript(path):
                 name = block.get("name", "")
                 p_save = pending["save"]
                 p_miss = pending["miss"]
-                if p_save is not None and p_save["claimed"] and not p_save["complied"]:
-                    if name == "mcp__recall__save_memory":
-                        p_save["complied"] = True
-                if p_miss is not None and p_miss["claimed"] and not p_miss["complied"]:
-                    if name == "mcp__recall__report_miss":
-                        p_miss["complied"] = True
+                if (
+                    p_save is not None
+                    and p_save["claimed"]
+                    and not p_save["complied"]
+                    and name == "mcp__recall__save_memory"
+                ):
+                    p_save["complied"] = True
+                if (
+                    p_miss is not None
+                    and p_miss["claimed"]
+                    and not p_miss["complied"]
+                    and name == "mcp__recall__report_miss"
+                ):
+                    p_miss["complied"] = True
 
     finalize_all()
     return events

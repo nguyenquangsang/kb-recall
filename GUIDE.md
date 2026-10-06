@@ -75,10 +75,15 @@ This does five things in one pass:
 1. **Register MCP server** — `claude mcp add --scope user recall ...`. Verify with `claude mcp list`.
 2. **Configure project** — adds the project path to `~/.recall-mcp/config.json`, and writes the kb-recall section into `CLAUDE.local.md` (created if missing, added to `.gitignore`) — not the team-shared `CLAUDE.md`, since these are per-developer opt-in instructions.
 3. **Configure issue tracker** — asks once whether the project uses Jira or none/other, saved to `config.json` so `/recall:init` never has to ask again. Skipped automatically (not guessed) when run non-interactively.
-4. **Install hooks** — adds the `UserPromptSubmit` hook (the `recall prompt` command, written as an absolute path — see [Installation](README.md#installation)) to `~/.claude/settings.json`. This is the only hook kb-recall installs — it injects the feature index, branch-based KB suggestion, and the turn-counter save reminder on every prompt. (An earlier design also used a `PreCompact` hook for a pre-compaction save reminder; that was dropped — a turn-counter reminder via `UserPromptSubmit` covers the same need without the extra hook.)
+4. **Install hooks** — adds the `UserPromptSubmit` hook (the `recall prompt` command, written as an absolute path — see [Installation](README.md#installation)) to `~/.claude/settings.json`. For Claude Code this is the only hook kb-recall installs — it injects the feature index, branch-based KB suggestion, and the turn-counter save reminder on every prompt. (An earlier design also used a `PreCompact` hook for a pre-compaction save reminder; that was dropped — a turn-counter reminder via `UserPromptSubmit` covers the same need without the extra hook.)
 5. **Sync slash commands** — same as running `recall sync-commands` (see below).
 
 Reload Claude Code after setup. Every prompt will include the feature index and a KB suggestion if the current branch matches a known feature slug.
+
+Using GitHub Copilot too? `recall setup --platform copilot` (or `--platform all`) sets
+up the same KB store for Copilot — writing `.mcp.json` and `.github/hooks/recall.json`
+instead of touching `~/.claude/`. Full details in the README's
+[GitHub Copilot](README.md#github-copilot) section.
 
 ---
 
@@ -136,7 +141,7 @@ update_readme(
 
 `confirm=True` is safe here since the section is still an empty placeholder — nothing is being overwritten. Omitting `confirm` (defaults to False) instead returns a diff preview and writes nothing; see below.
 
-Repeat for other sections you have content for: `overview`, `key_files`, `technical_stack`, `architecture`, `critical_warnings`, `related_tickets`. Skip sections with nothing to say yet.
+Repeat for other sections you have content for: `overview`, `key_files`, `technical_stack`, `architecture`, `critical_warnings`, `open_items`, `checklist`, `related_tickets`. Skip sections with nothing to say yet.
 
 For `related_tickets`, use one entry per line: `slug (TICKET-ID): reason`. Claude will hint to load these features when this KB is loaded.
 
@@ -184,7 +189,7 @@ save_memory(
 
 ![During a session — Claude saving an insight to the KB as it works, without you taking notes](images/3-working.gif)
 
-After saving, check whether to promote to README: `[gotcha]`/`[constraint]` → `update_readme(section="critical_warnings", mode="append")`; `[decision]` → `update_readme(section="architecture", mode="append")`; `[rule]` → `update_readme(section="business_rules", mode="append")`. Skip promotion for `[bug]`, `[idea]`, and `[pattern]`.
+Promotion to README is automatic at save time: `[gotcha]`/`[constraint]` → `critical_warnings`, `[decision]` → `architecture`, `[rule]` → `business_rules`; `[bug]`/`[idea]`/`[pattern]` stay in memories only.
 
 ### When architecture changes
 
@@ -293,7 +298,9 @@ Lists all feature KBs across configured projects.
 list_features(project="")
 ```
 
-Call at the start of a session to orient yourself. The hook does this automatically if configured.
+Call only when you need slug discovery — you don't know what KBs exist, or a
+`load_feature_context` call returned "not found". The hook injects the feature index at
+session start, so don't call this just to orient yourself.
 
 ---
 
@@ -333,7 +340,7 @@ Prepends a single insight to the current user's `memories-{username}.md`, dated 
 save_memory(slug="payment-gateway", content="...")
 ```
 
-Only call for significant findings. See [Writing good memories](#6-writing-good-memories) for what qualifies.
+Only call for significant findings. See [Writing good memories](#7-writing-good-memories) for what qualifies.
 
 ---
 
@@ -541,6 +548,20 @@ It should be an absolute path (`/Users/you/.local/bin/recall prompt`), not a bar
 ### `list_features` returns empty
 
 No features have been created for this project yet. Call `init_feature` to create the first one.
+
+### `save_memory` is rejected, blocked, or skips promotion
+
+Since 0.2.0 `save_memory` can refuse or downgrade a save; the response always says
+which happened — it never fails silently:
+
+- **`Rejected: near-duplicate`** — the insight is too similar (Jaccard ≥ 0.8) to an
+  entry already in the KB, so the save was not written. Save again only if it adds
+  something new, or use `[supersedes:<id>]` if it corrects the old entry.
+- **`⚠️ Save blocked`** — the KB is at its hard size limit or full-body growth
+  ceiling, so the save was not written. Run `/recall:compact` (and `/recall:tidy` if
+  the README is large) to shrink it, then save again.
+- **`⚠️ Promotion skipped`** — the save succeeded, but the entry was too similar to
+  an existing README block to promote. The memory is still in the journal.
 
 ### MCP server not connecting
 

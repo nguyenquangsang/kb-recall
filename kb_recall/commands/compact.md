@@ -28,7 +28,7 @@ If it returns a "too large to load safely" error, that KB needs *this* command p
 
 Review each memory entry and assign exactly one category:
 
-**Retire** — add `[resolved:XXXX]` to hide, no replacement:
+**Retire** — add `[resolved:XXXX]` to hide the memory from future loads, no replacement. This never edits the README (use `[supersedes:XXXX]` when a README block itself must change):
 - Entry's primary tag (first tag) is `[decision]`, `[gotcha]`, `[constraint]`, `[rule]`, or `[pattern]` AND the same conclusion already appears in a README section (`critical_warnings`, `architecture`, or `business_rules`) with equivalent coverage. Do not retire on vague similarity — retire only when the README entry captures the same actionable constraint or decision. `[idea]` is never eligible here even if it looks duplicate — an idea that matches README content was likely adopted, not merely repeated; correct that with `[decision][supersedes:XXXX]` instead (see the "Closing an idea" convention), not a silent retire.
 - Entry is pure implementation history (file renames, feature deletions, debug steps) clearly derivable from `git log`. When in doubt, keep.
 

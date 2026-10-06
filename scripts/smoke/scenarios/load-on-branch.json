@@ -1,0 +1,10 @@
+{
+  "name": "load-on-branch",
+  "description": "On a branch that matches a KB, the model loads that KB before answering a question about the feature.",
+  "why": "This is the core promise of the tool — the hook injects the index and suggests the KB, but only the model can act on it. A miss here means the KB never reaches the conversation at all.",
+  "setup": "Run from a git repo checked out on a branch whose name matches an existing slug, with that KB present in the store.",
+  "prompt": "I need to make a change in this feature. Before you do anything, load whatever context you have about it and summarise the constraints I should know about.",
+  "requires": [["load_feature_context"]],
+  "forbids": [],
+  "min_calls": 1
+}

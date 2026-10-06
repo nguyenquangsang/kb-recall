@@ -58,20 +58,36 @@ Open a PR into `main` and let CI run, or merge locally and push. The PR path is
 preferable for the first release: it exercises `.github/workflows/ci.yml` before
 a tag ever depends on it.
 
-### 5. Tag and push
+### 5. Publish a GitHub Release
 
-The tag must point at a commit on `main`, and the tag must agree with `version`
-in the `[project]` table of `pyproject.toml` — nothing checks this automatically.
+Update `version` in `pyproject.toml` and move `CHANGELOG.md`'s Unreleased entries
+under a new heading dated today. Land both on `main` and push **before** you
+release — a tag is only a pointer, and `publish.yml` publishes whatever commit it
+points at.
+
+Then create the release: **Releases → Draft a new release**. Type `v0.2.0` into
+**Choose a tag** and click **Create new tag**, and check that **Target** reads
+`main`. Publishing the release creates and pushes that tag, and *that* is what
+triggers `.github/workflows/publish.yml`.
 
 ```bash
-# editor: bump version in pyproject.toml
 git checkout main && git pull
-git tag v0.1.0
-git push origin v0.1.0
+# bump version in pyproject.toml, date CHANGELOG.md, commit, push
 ```
 
-This triggers `.github/workflows/publish.yml`, which calls `ci.yml` (ruff, mypy
-and pytest on Python 3.10–3.13) and only then builds and publishes to PyPI.
+A bare `git tag v0.2.0 && git push origin v0.2.0` publishes nothing: the workflow
+listens for a published release, not for a tag push. That is deliberate — a tag
+push can point at any commit, including one on an unreviewed branch.
+
+`publish.yml` enforces two things itself, both failing before the build:
+
+- the tag agrees with `version` in `pyproject.toml`, so it never publishes a
+  number nobody chose;
+- the full test suite passes on the tagged commit, because the publish job
+  requires `ci.yml` to succeed first.
+
+Two things nothing checks, so they stay yours: that **Target** is `main`, and
+that the version number is still free on PyPI.
 
 ### 6. Verify
 
@@ -89,8 +105,11 @@ the package metadata, so the project page should render completely.
   same version, not even after a yank. A bug found post-publish means a new
   version, never a fix to the existing one.
 - **A failed `publish` job has not consumed a version.** If the OIDC handshake
-  fails because step 3 was filled in wrong, fix step 3, delete the tag, and push
-  it again — nothing reached PyPI, so `0.1.0` is still available.
+  fails because step 3 was filled in wrong, fix step 3 and use **Re-run failed
+  jobs** on that run — nothing reached PyPI, so that version number is still
+  available. Re-running is now the only route back: deleting the tag and pushing
+  it again re-triggers nothing, because the workflow listens for a published
+  release rather than a tag push.
 - **`permissions: id-token: write` without `contents: read`.** The `publish` job
   declares only the OIDC permission, matching PyPI's own documented example.
   For a public repository `actions/checkout` reads anonymously, so this is fine;

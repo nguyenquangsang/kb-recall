@@ -1,4 +1,4 @@
-Create a new feature knowledge base.
+Create a new feature knowledge base. Argument (optional): **$ARGUMENTS**
 
 ## When to use
 

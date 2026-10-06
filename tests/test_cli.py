@@ -1,12 +1,14 @@
 """Unit tests for kb_recall/cli.py's block-idle command."""
 
 import json
+import re
 import subprocess
 import sys
 
 import pytest
 
 from kb_recall import cli
+from kb_recall.adapters.copilot.hook import POST_TOOL_USE_MATCHER
 
 
 @pytest.fixture
@@ -200,9 +202,7 @@ class TestCmdSetup:
         cfg = json.loads((cli.KB_ROOT / "config.json").read_text())
         assert str(project) in cfg["projects"]
 
-    def test_reregisters_instead_of_leaving_a_stale_entry(
-        self, project, monkeypatch
-    ):
+    def test_reregisters_instead_of_leaving_a_stale_entry(self, project, monkeypatch):
         """`mcp add` refuses to overwrite, and an entry that exists may be stale.
 
         Registration is now a console script, but an older setup wrote a script
@@ -220,12 +220,352 @@ class TestCmdSetup:
 
         assert cli.cmd_setup([]) == 0
         assert calls[0] == [
-            "/bin/claude", "mcp", "remove", "--scope", "user", "recall",
+            "/bin/claude",
+            "mcp",
+            "remove",
+            "--scope",
+            "user",
+            "recall",
         ]
         assert calls[1] == [
-            "/bin/claude", "mcp", "add", "--scope", "user", "recall", "--",
+            "/bin/claude",
+            "mcp",
+            "add",
+            "--scope",
+            "user",
+            "recall",
+            "--",
             "/bin/recall-server",
         ]
+
+
+class TestParsePlatform:
+    def test_defaults_to_claude(self):
+        """`setup` gained a flag; it did not change meaning. Every existing
+        invocation — and every doc that says `recall setup` — keeps the behaviour
+        it had before, so an existing user is never surprised by new files."""
+        assert cli._parse_platform([]) == "claude"
+
+    @pytest.mark.parametrize("platform", cli.PLATFORMS)
+    def test_accepts_every_platform(self, platform):
+        assert cli._parse_platform(["--platform", platform]) == platform
+
+    def test_accepts_the_equals_form(self):
+        assert cli._parse_platform(["--platform=copilot"]) == "copilot"
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["--platform"],  # flag with no value — reject, do not guess a platform
+            ["--platform", "claude-code"],
+            ["--platform="],
+            ["--platform", "CLAUDE"],  # case-sensitive deliberately
+        ],
+    )
+    def test_rejects_missing_or_unknown_values(self, args):
+        """None, not a fallback to "claude": a silent fallback would run a
+        Claude-only setup for someone who asked for Copilot, and report success."""
+        assert cli._parse_platform(args) is None
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["--platfrom", "copilot"],  # transposed flag name
+            ["-p", "copilot"],
+            ["--platform", "copilot", "--verbose"],  # valid flag, stray extra
+            ["copilot"],
+        ],
+    )
+    def test_rejects_unrecognized_arguments(self, args):
+        """An argument that is not `--platform` is rejected, not skipped.
+
+        Skipping it made a mistyped flag behave as if it had not been passed at
+        all, so `--platfrom copilot` ran the default Claude setup — the same
+        wrong-platform failure the bad-value case above already guards against.
+        """
+        assert cli._parse_platform(args) is None
+
+
+class TestCmdSetupCopilot:
+    """`--platform copilot` is the one path that must never write into ~/.claude/.
+
+    Claude and Copilot are configured independently on purpose: one platform's
+    setup silently rewriting the other's live hook config is the failure this
+    separation exists to prevent, so it is asserted rather than assumed.
+    """
+
+    @pytest.fixture
+    def project(self, tmp_path, monkeypatch):
+        script_dir = tmp_path / "script"
+        (script_dir / "templates").mkdir(parents=True)
+        (script_dir / "templates" / "claude-md-snippet.md").write_text("recall-mcp\n")
+        (script_dir / "templates" / "copilot-instructions.md").write_text(
+            "recall-mcp for copilot\n"
+        )
+        (script_dir / "skills" / "recall-load").mkdir(parents=True)
+        (script_dir / "skills" / "recall-load" / "SKILL.md").write_text(
+            "---\nname: recall-load\ndescription: load a KB\n---\n\n## When to use\n"
+            "Never wrong.\n"
+        )
+
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+
+        monkeypatch.setattr(cli, "SCRIPT_DIR", script_dir)
+        monkeypatch.setattr(cli, "KB_ROOT", tmp_path / "kb")
+        monkeypatch.setattr(
+            cli, "CLAUDE_SETTINGS", tmp_path / "claude" / "settings.json"
+        )
+        monkeypatch.setattr(cli, "COPILOT_SKILLS_DIR", tmp_path / "copilot" / "skills")
+        monkeypatch.setattr(cli, "cmd_sync_commands", lambda *_: 0)
+        monkeypatch.setattr("builtins.input", lambda *_: "other")
+        monkeypatch.setattr(cli.shutil, "which", lambda name: f"/fake/bin/{name}")
+        return project_dir
+
+    def test_writes_the_mcp_config(self, project):
+        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+
+        server = json.loads((project / ".mcp.json").read_text())["mcpServers"]["recall"]
+        assert server["type"] == "stdio"
+        assert server["command"] == "/fake/bin/recall-server"
+
+    def test_writes_both_hook_events_with_the_event_on_argv(self, project):
+        """Both events in one file: the adapter dispatches on argv[1], and the
+        payload's casing says nothing about which event fired, so the event name
+        has to be baked into the command string."""
+        cli.cmd_setup(["--platform", "copilot"])
+
+        hooks = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
+            "hooks"
+        ]
+        assert set(hooks) == {"sessionStart", "postToolUse"}
+        assert hooks["sessionStart"][0]["command"].endswith(" sessionStart")
+        assert hooks["postToolUse"][0]["command"].endswith(" postToolUse")
+
+    def test_matcher_matches_the_adapter_it_configures(self, project):
+        """The generator reads the matcher from the adapter rather than holding a
+        second copy: an invalid regex makes the harness skip the whole hook entry
+        SILENTLY, so a drifted copy would fail with no signal at all."""
+        cli.cmd_setup(["--platform", "copilot"])
+
+        entry = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
+            "hooks"
+        ]["postToolUse"][0]
+        assert entry["matcher"] == POST_TOOL_USE_MATCHER
+        re.compile(f"^(?:{entry['matcher']})$")
+
+    def test_never_touches_the_claude_tree(self, project, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "cmd_sync_commands", lambda *_: pytest.fail("called"))
+        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+
+        assert not cli.CLAUDE_SETTINGS.exists()
+        assert not (project / "CLAUDE.local.md").exists()
+        assert "reload Claude Code" not in capsys.readouterr().out
+
+    def test_never_looks_for_the_claude_cli(self, project, monkeypatch):
+        def boom():
+            raise AssertionError("the Copilot path must not probe for `claude`")
+
+        monkeypatch.setattr(cli, "_claude_cli", boom)
+        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+
+    def test_writes_the_instructions_file(self, project):
+        cli.cmd_setup(["--platform", "copilot"])
+        assert (
+            "recall-mcp for copilot"
+            in (project / ".github" / "copilot-instructions.md").read_text()
+        )
+
+    def test_writes_the_skills_to_user_scope(self, project):
+        cli.cmd_setup(["--platform", "copilot"])
+        skill = cli.COPILOT_SKILLS_DIR / "recall-load" / "SKILL.md"
+        assert skill.is_symlink() or skill.exists()
+        assert "name: recall-load" in skill.read_text()
+
+    def test_skills_are_user_scoped_not_project_scoped(self, project):
+        """Skills serve every project, so they install once under ~/.copilot/
+        (like Claude commands under ~/.claude/), not into the project."""
+        cli.cmd_setup(["--platform", "copilot"])
+        assert not (project / ".github" / "skills").exists()
+        assert (cli.COPILOT_SKILLS_DIR / "recall-load").exists()
+
+    def test_gitignores_only_the_machine_specific_files(self, project):
+        """The hook command bakes in an absolute path to this machine's console
+        script, so the config files are per-machine. The instructions file is not:
+        it carries no machine-specific path and is the only channel Copilot reads
+        from the repo, so it stays committable."""
+        cli.cmd_setup(["--platform", "copilot"])
+
+        ignored = (project / ".gitignore").read_text().splitlines()
+        assert ".mcp.json" in ignored
+        assert ".github/hooks/recall.json" in ignored
+        assert not any("copilot-instructions" in entry for entry in ignored)
+
+    def test_rerunning_does_not_duplicate_gitignore_entries(self, project):
+        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["--platform", "copilot"])
+
+        ignored = (project / ".gitignore").read_text().splitlines()
+        assert ignored.count(".mcp.json") == 1
+
+    def test_writes_instructions_even_when_claude_md_already_carries_recall(
+        self, project
+    ):
+        """The Claude snippet omits the Copilot-only corrections (no index
+        injection, list_features needed), so Copilot still gets its own file even
+        when CLAUDE.local.md already has recall-mcp — `--platform all` must not
+        leave Copilot holding only the Claude-flavoured guidance."""
+        (project / "CLAUDE.local.md").write_text("recall-mcp\n")
+
+        cli.cmd_setup(["--platform", "copilot"])
+
+        assert (project / ".github" / "copilot-instructions.md").exists()
+        assert (
+            "recall-mcp for copilot"
+            in (project / ".github" / "copilot-instructions.md").read_text()
+        )
+
+    def test_mcp_config_preserves_other_servers(self, project):
+        """`.mcp.json` is the shared workspace-root MCP config — a recall setup
+        must merge into it, not overwrite it, or every other server there is lost."""
+        (project / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "other-team-server": {"type": "stdio", "command": "/bin/other"}
+                    }
+                }
+            )
+        )
+
+        cli.cmd_setup(["--platform", "copilot"])
+
+        servers = json.loads((project / ".mcp.json").read_text())["mcpServers"]
+        assert servers["other-team-server"] == {
+            "type": "stdio",
+            "command": "/bin/other",
+        }
+        assert "recall" in servers
+
+    def test_instructions_appends_instead_of_clobbering(self, project):
+        """A .github/copilot-instructions.md without the recall-mcp marker is the
+        team's own content — setup must append to it, never replace it."""
+        (project / ".github").mkdir(parents=True, exist_ok=True)
+        (project / ".github" / "copilot-instructions.md").write_text(
+            "# Team rules\nAlways run make lint.\n"
+        )
+
+        cli.cmd_setup(["--platform", "copilot"])
+
+        text = (project / ".github" / "copilot-instructions.md").read_text()
+        assert "Always run make lint." in text
+        assert "recall-mcp for copilot" in text
+
+    def test_hook_config_preserves_other_events(self, project):
+        """A hook file may carry events for other tools — merge recall's events in,
+        preserving the rest."""
+        (project / ".github" / "hooks").mkdir(parents=True, exist_ok=True)
+        (project / ".github" / "hooks" / "recall.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "hooks": {
+                        "preToolUse": [{"type": "command", "command": "/bin/other"}]
+                    },
+                }
+            )
+        )
+
+        cli.cmd_setup(["--platform", "copilot"])
+
+        hooks = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
+            "hooks"
+        ]
+        assert hooks["preToolUse"] == [{"type": "command", "command": "/bin/other"}]
+        assert "sessionStart" in hooks
+
+    def test_malformed_mcp_json_is_left_untouched(self, project, capsys):
+        """A .mcp.json we can't parse must not be clobbered — refuse rather than
+        destroy whatever is in it."""
+        (project / ".mcp.json").write_text("{ not valid json")
+
+        cli.cmd_setup(["--platform", "copilot"])
+
+        assert (project / ".mcp.json").read_text() == "{ not valid json"
+        assert "isn't valid JSON" in capsys.readouterr().out
+
+    def test_claude_platform_writes_no_copilot_files(self, project, monkeypatch):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
+        assert cli.cmd_setup(["--platform", "claude"]) == 0
+
+        assert not (project / ".mcp.json").exists()
+        assert not (project / ".github").exists()
+
+    def test_all_writes_both(self, project, monkeypatch):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
+        assert cli.cmd_setup(["--platform", "all"]) == 0
+
+        assert (project / "CLAUDE.local.md").exists()
+        assert (project / ".mcp.json").exists()
+        assert (project / ".github" / "hooks" / "recall.json").exists()
+        # Copilot still gets its own instructions file: the Claude snippet omits
+        # the Copilot-only corrections.
+        assert (project / ".github" / "copilot-instructions.md").exists()
+
+    def test_invalid_platform_exits_nonzero_and_writes_nothing(self, project, capsys):
+        assert cli.cmd_setup(["--platform", "wsl"]) == 1
+
+        assert "--platform claude|copilot|all" in capsys.readouterr().err
+        assert not (project / ".mcp.json").exists()
+        assert not (cli.KB_ROOT / "config.json").exists()
+
+    def test_mistyped_flag_writes_nothing(self, project, capsys):
+        """`--platfrom` must abort, not fall through to the default platform.
+
+        Before unknown arguments were rejected, this ran a full Claude setup —
+        registering the MCP server and writing Claude files — while the user
+        believed they had asked for Copilot.
+        """
+        assert cli.cmd_setup(["--platfrom", "copilot"]) == 1
+
+        assert "--platform claude|copilot|all" in capsys.readouterr().err
+        assert not (project / ".mcp.json").exists()
+        assert not (project / ".github").exists()
+        assert not (project / "CLAUDE.local.md").exists()
+
+
+class TestHelpFlag:
+    """`--help` must print usage instead of running the command.
+
+    Only `args[0]` used to be checked, so `recall setup --help` reached
+    `cmd_setup`, which ignored the flag it did not recognize — registering the
+    MCP server and installing hooks for someone who asked for help.
+    """
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["recall", "--help"],
+            ["recall", "-h"],
+            ["recall", "setup", "--help"],
+            ["recall", "block-idle", "--help"],
+        ],
+    )
+    def test_prints_usage_without_dispatching(self, argv, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", argv)
+
+        def _explode(*_args, **_kwargs):
+            raise AssertionError(f"dispatched for {argv}")
+
+        monkeypatch.setattr(cli, "cmd_setup", _explode)
+        monkeypatch.setattr(cli, "cmd_block_idle", _explode)
+
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+
+        assert exc.value.code == 0
+        assert "Usage: recall <command>" in capsys.readouterr().out
 
 
 class TestServerCommand:

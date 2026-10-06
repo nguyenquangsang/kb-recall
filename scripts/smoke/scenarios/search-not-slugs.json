@@ -1,0 +1,10 @@
+{
+  "name": "search-not-slugs",
+  "description": "The model uses list_features (not search_features) to discover slugs when asked to create a KB.",
+  "why": "search_features' FORMAT draws an explicit boundary: never use it for slug discovery, because the hook-injected index already covers that. This is the clearest 'wrong tool for the job' boundary in the toolset, and the one a weaker model is most likely to cross.",
+  "setup": "Run from a branch with at least one existing KB so list_features has something to return.",
+  "prompt": "Start a new feature KB for the work I'm about to do on our invoice export. Check what already exists first so we don't collide with an existing one, then create it.",
+  "requires": [["list_features", "init_feature"]],
+  "forbids": ["search_features"],
+  "min_calls": 2
+}
