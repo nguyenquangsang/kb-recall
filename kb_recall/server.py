@@ -1243,7 +1243,9 @@ def _render_size_chars(
         else:
             combined_blocks.append(block)
     combined = "\n\n".join(combined_blocks)
-    index_text, _cut_titles = _cap_index_titles(index_lines, KB_INDEX_TITLE_BUDGET_CHARS)
+    index_text, _cut_titles = _cap_index_titles(
+        index_lines, KB_INDEX_TITLE_BUDGET_CHARS
+    )
     return readme_chars + len(combined) + len(index_text)
 
 
