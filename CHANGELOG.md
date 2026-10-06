@@ -41,7 +41,7 @@ The distribution name is `kb-recall`, the command is `recall`.
   the tool docstring contract (`test_docstring_contract.py`), end-to-end lifecycle
   (`test_end_to_end.py`), stdio smoke (`test_stdio_smoke.py`), the smoke scorer
   (`test_smoke_scorer.py`), and the Copilot adapter (`test_copilot_adapter.py`).
-  The suite grew from 174 to 437 tests.
+  The suite grew from 174 to 451 tests.
 - Ruff's rule set is pinned explicitly in `pyproject.toml` rather than left to each
   installed version's defaults.
 
@@ -58,6 +58,17 @@ The distribution name is `kb-recall`, the command is `recall`.
   `[pattern]` stay in the journal.
 - Documentation now addresses "your agent" rather than "Claude" where the behavior is
   shared with Copilot.
+
+### Fixed
+
+- **`recall setup --help` ran a real setup** instead of printing usage. Only the first
+  argument was checked for `-h`/`--help`, so the flag reached `cmd_setup`, which ignored
+  what it did not recognize — registering the MCP server, installing hooks, and
+  symlinking the commands for someone who asked for help.
+- **A mistyped `recall setup` flag no longer falls back to the default platform.** An
+  unrecognized argument is now rejected with usage rather than skipped, so
+  `--platfrom copilot` aborts instead of silently running a Claude setup and writing
+  to `~/.claude/`.
 
 ## [0.1.0] — 2026-09-19
 

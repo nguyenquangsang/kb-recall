@@ -267,6 +267,24 @@ class TestParsePlatform:
         Claude-only setup for someone who asked for Copilot, and report success."""
         assert cli._parse_platform(args) is None
 
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["--platfrom", "copilot"],  # transposed flag name
+            ["-p", "copilot"],
+            ["--platform", "copilot", "--verbose"],  # valid flag, stray extra
+            ["copilot"],
+        ],
+    )
+    def test_rejects_unrecognized_arguments(self, args):
+        """An argument that is not `--platform` is rejected, not skipped.
+
+        Skipping it made a mistyped flag behave as if it had not been passed at
+        all, so `--platfrom copilot` ran the default Claude setup — the same
+        wrong-platform failure the bad-value case above already guards against.
+        """
+        assert cli._parse_platform(args) is None
+
 
 class TestCmdSetupCopilot:
     """`--platform copilot` is the one path that must never write into ~/.claude/.
@@ -501,6 +519,53 @@ class TestCmdSetupCopilot:
         assert "--platform claude|copilot|all" in capsys.readouterr().err
         assert not (project / ".mcp.json").exists()
         assert not (cli.KB_ROOT / "config.json").exists()
+
+    def test_mistyped_flag_writes_nothing(self, project, capsys):
+        """`--platfrom` must abort, not fall through to the default platform.
+
+        Before unknown arguments were rejected, this ran a full Claude setup —
+        registering the MCP server and writing Claude files — while the user
+        believed they had asked for Copilot.
+        """
+        assert cli.cmd_setup(["--platfrom", "copilot"]) == 1
+
+        assert "--platform claude|copilot|all" in capsys.readouterr().err
+        assert not (project / ".mcp.json").exists()
+        assert not (project / ".github").exists()
+        assert not (project / "CLAUDE.local.md").exists()
+
+
+class TestHelpFlag:
+    """`--help` must print usage instead of running the command.
+
+    Only `args[0]` used to be checked, so `recall setup --help` reached
+    `cmd_setup`, which ignored the flag it did not recognize — registering the
+    MCP server and installing hooks for someone who asked for help.
+    """
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["recall", "--help"],
+            ["recall", "-h"],
+            ["recall", "setup", "--help"],
+            ["recall", "block-idle", "--help"],
+        ],
+    )
+    def test_prints_usage_without_dispatching(self, argv, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "argv", argv)
+
+        def _explode(*_args, **_kwargs):
+            raise AssertionError(f"dispatched for {argv}")
+
+        monkeypatch.setattr(cli, "cmd_setup", _explode)
+        monkeypatch.setattr(cli, "cmd_block_idle", _explode)
+
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+
+        assert exc.value.code == 0
+        assert "Usage: recall <command>" in capsys.readouterr().out
 
 
 class TestServerCommand:

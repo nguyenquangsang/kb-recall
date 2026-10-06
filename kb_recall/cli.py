@@ -176,10 +176,15 @@ COPILOT_SKILLS_DIR = Path.home() / ".copilot" / "skills"
 
 
 def _parse_platform(args: list[str]) -> str | None:
-    """Return the requested platform, or None when the value is missing/invalid.
+    """Return the requested platform, or None when the invocation is rejected.
 
     Defaults to "claude": `recall setup` gained a flag, it did not change meaning,
     so every existing invocation keeps the behaviour it had.
+
+    Every argument this does not recognize is rejected, not ignored. Ignoring one
+    made a typo indistinguishable from the default: `recall setup --platfrom
+    copilot` wrote Claude config to ~/.claude/ and reported success, which is the
+    exact failure the missing-value case below already refuses to risk.
     """
     platform = "claude"
     i = 0
@@ -193,6 +198,8 @@ def _parse_platform(args: list[str]) -> str | None:
             continue
         if arg.startswith("--platform="):
             platform = arg.split("=", 1)[1]
+        else:
+            return None  # unrecognized argument — reject rather than ignore
         i += 1
     return platform if platform in PLATFORMS else None
 
@@ -384,7 +391,9 @@ def _setup_copilot(project_dir: Path) -> None:
     hooks_file.parent.mkdir(parents=True, exist_ok=True)
     existing_hooks = _read_json_dict(hooks_file)
     if existing_hooks is None:
-        print(f"  — {hooks_file.name} exists but isn't valid JSON; leaving it untouched")
+        print(
+            f"  — {hooks_file.name} exists but isn't valid JSON; leaving it untouched"
+        )
     else:
         # Preserve other event keys a user may have added; replace only recall's own.
         merged_hooks = existing_hooks.get("hooks", {})
@@ -413,11 +422,17 @@ def _setup_copilot(project_dir: Path) -> None:
 def cmd_setup(args: list[str]) -> int:
     platform = _parse_platform(args)
     if platform is None:
+        # One message for both rejections (a bad value and an unrecognized argument)
+        # because the caller cannot tell them apart from the exit code alone, and the
+        # usage line names every accepted value either way.
         print(
-            f"  Invalid --platform. Expected one of: {', '.join(PLATFORMS)}.",
+            f"  Invalid arguments. Expected --platform to be one of: {', '.join(PLATFORMS)}.",
             file=sys.stderr,
         )
-        print("  Usage: recall setup [--platform claude|copilot|all]", file=sys.stderr)
+        print(
+            f"  Usage: recall setup [--platform {'|'.join(PLATFORMS)}]",
+            file=sys.stderr,
+        )
         return 1
 
     do_claude = platform in ("claude", "all")
@@ -617,26 +632,34 @@ def cmd_setup(args: list[str]) -> int:
     return 0
 
 
+def _print_usage() -> None:
+    print("Usage: recall <command>")
+    print()
+    print("Commands:")
+    print("  setup [--platform claude|copilot|all]")
+    print(
+        "                  Register MCP server, configure project, install hooks, sync commands"
+    )
+    print(
+        "                  (default: claude — copilot writes .mcp.json + .github/, never ~/.claude/)"
+    )
+    print("  sync-commands   Re-sync slash commands to ~/.claude/commands/recall/")
+    print(
+        "  prompt          Run the UserPromptSubmit hook (called by settings.json, not by hand)"
+    )
+    print(
+        "  block-idle <true|false>   Enable/disable the idle-gap hard-block (warn-only reminders stay on)"
+    )
+
+
 def main() -> None:
     args = sys.argv[1:]
-    if not args or args[0] in ("-h", "--help"):
-        print("Usage: recall <command>")
-        print()
-        print("Commands:")
-        print("  setup [--platform claude|copilot|all]")
-        print(
-            "                  Register MCP server, configure project, install hooks, sync commands"
-        )
-        print(
-            "                  (default: claude — copilot writes .mcp.json + .github/, never ~/.claude/)"
-        )
-        print("  sync-commands   Re-sync slash commands to ~/.claude/commands/recall/")
-        print(
-            "  prompt          Run the UserPromptSubmit hook (called by settings.json, not by hand)"
-        )
-        print(
-            "  block-idle <true|false>   Enable/disable the idle-gap hard-block (warn-only reminders stay on)"
-        )
+    # `--help` is honoured in any position, not only as args[0]. Checking only the
+    # first argument meant `recall setup --help` reached cmd_setup, which ignored
+    # what it did not recognize — so asking for help ran a real setup instead:
+    # registered the MCP server, installed hooks, and symlinked the commands.
+    if not args or any(arg in ("-h", "--help") for arg in args):
+        _print_usage()
         sys.exit(0)
 
     command = args[0]
