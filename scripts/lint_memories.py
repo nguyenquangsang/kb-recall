@@ -19,8 +19,8 @@ Checks, all mechanical / regex-based:
    4 to 6 hex chars (2026-07-27) — a [supersedes:XXXX]/[resolved:XXXX] referencing
    a duplicated ID hides ALL entries with that ID, not just the intended one.
 
-Deliberately NOT doing near-duplicate/semantic-similarity detection — see
-TODO.md item #29: text-overlap heuristics are prone to false positives, and an
+Deliberately NOT doing near-duplicate/semantic-similarity detection —
+text-overlap heuristics are prone to false positives, and an
 LLM-based similarity check would double the cost of every save. Out of scope
 for a "dumb but reliable" lint pass.
 
@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from kb_recall import server  # noqa: E402 — needs sys.path adjustment above first
+from kb_recall import server  # imported after the sys.path insert above
 
 ENTRY_SPLIT_RE = re.compile(r"(?m)^(?=- \*\*\d{4}-\d{2}-\d{2}\*\* )")
 # report_miss entries insert an extra "[MISS]" tag between the id and the
@@ -134,7 +134,7 @@ def supersede_stats(path):
     the original — a rough proxy for "caught and fixed almost immediately"
     (more likely a real correction) vs. a later supersede (more likely natural
     decision evolution, not necessarily an error). Not a proxy for truth, just
-    a directional signal — see TODO.md item on measurability (2026-07-14).
+    a directional signal, not a measurement (measurability caveat, 2026-07-14).
     """
     entries = list(parse_entries(path.read_text()))
     by_id = {eid: entry_date for entry_date, eid, _, _ in entries}
@@ -145,12 +145,11 @@ def supersede_stats(path):
     earliest_ref_date = {}
     for entry_date, _, _, content in entries:
         for ref_id in REF_RE.findall(content):
-            if ref_id in by_id:
-                if (
-                    ref_id not in earliest_ref_date
-                    or entry_date < earliest_ref_date[ref_id]
-                ):
-                    earliest_ref_date[ref_id] = entry_date
+            if ref_id in by_id and (
+                ref_id not in earliest_ref_date
+                or entry_date < earliest_ref_date[ref_id]
+            ):
+                earliest_ref_date[ref_id] = entry_date
 
     same_day = sum(
         1

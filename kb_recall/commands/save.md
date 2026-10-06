@@ -78,7 +78,7 @@ A passing memory has a clear WHY, a specific Apply condition, and would have pre
 
 ## Step 5 — Save
 
-Call all `save_memory` calls **in parallel** — one batch, not sequentially.
+Call all `save_memory` calls **sequentially, never in parallel** — each save does a non-atomic read-modify-write on the memories file AND, since auto-promotion, on README.md; parallel calls to the same file silently lose entries (each reports success even when its write was clobbered).
 Format as What/Why/Apply — do not pass raw notes. Be decisive — no approval needed per entry.
 
 **Entry is wrong or outdated** → `[supersedes:XXXX]` on the new tag line (XXXX = hex ID from `[id:XXXX]` on the stale entry).
@@ -86,11 +86,11 @@ Example: `**[gotcha][supersedes:b2e1] Corrected insight**`
 
 **`[idea]` resolved this session** → `[decision][supersedes:XXXX]` with conclusion (adopted) or reason (rejected).
 
-**Warning/constraint fixed in code, nothing replaces it** → closure record:
-`**[resolved:XXXX] <title>** — <one sentence: what change made this obsolete>`
+**Memory is dealt with, nothing replaces it** → closure record. `[resolved:XXXX]` hides the memory from future loads and never edits the README — write it once the conclusion lives in a README section, or the change landed in code:
+`**[resolved:XXXX] <title>** — <one sentence: what settled it>`
 Bulk: multiple tags on one line → `**[resolved:aaa] [resolved:bbb] title** — reason`
 
-*Decision rule:* `[supersedes]` = replaced by better info. `[resolved]` = gone, nothing takes its place.
+*Decision rule:* `[supersedes]` = replaced by better info — the new entry's block takes the old one's place in README. `[resolved]` = dealt with, body needs no further loading — hides the memory, leaves the README block alone.
 
 ## Step 6 — Contradiction check
 
@@ -98,7 +98,7 @@ Scan the loaded KB (already in context) against what you actually observed this 
 
 - Did you grep a value and find it different from what KB says? → `save_memory` with `[supersedes:XXXX]`.
 - Did you use a function, flag, or constant the KB describes, and it behaved differently? → `save_memory` with `[gotcha][supersedes:XXXX]` or `report_miss`.
-- Did you notice a `critical_warnings` entry that no longer applies (the bug was fixed, the constraint removed)? → `save_memory` with `[resolved:XXXX]`.
+- Did you notice a `critical_warnings` entry that no longer applies (the bug was fixed, the constraint removed)? → `save_memory` with `[supersedes:XXXX]` carrying the correction — `[resolved:XXXX]` would only hide the memory and leave the stale README entry in place.
 
 Only flag real contradictions — things you actually verified this session, not hypothetical drift. Skip entirely if nothing in the session touched KB-tracked values.
 
@@ -122,28 +122,21 @@ Ask: does the one-line summary still describe the feature's current scope, or ha
 
 Do this check here (end-of-session), not per `update_readme` call — the summary rarely drifts within a single README edit, and checking now is free since the KB is already fully loaded in context.
 
-## Step 9 — Promote to README
+## Step 9 — Promotion is automatic
 
-After saving, group promotable entries by target section:
-- `[gotcha]` or `[constraint]` → `section="critical_warnings"`
-- `[decision]` → `section="architecture"`
-- `[rule]` → `section="business_rules"`
+S1 promotes each saved entry to its README section at save time (with a `<!-- from:XXXX -->`
+marker) — you do NOT call `update_readme` to promote. After Step 5, read each save's
+promotion note:
+- `Promoted to <section>.` → done; the block landed with its marker and the source memory is
+  auto-hidden from future loads — do NOT write `[resolved:XXXX]` after a promotion.
+- `⚠️ Promotion skipped: …` → act on the stated reason (missing section → add it via
+  `update_readme`; growth ceiling → run `/recall:tidy`). Hand-writing the same content
+  instead is fine, but copy the memory's body verbatim: a verbatim block is recognised and
+  gets its `from:` marker attached, while a paraphrase stays an orphan that no later
+  supersede can replace.
+- `⚠️ Promotion to <section> failed (…)` → memory saved, promotion failed; fix by hand if it matters.
 
-**Skip if:** tagged `[bug]`, `[idea]`, `[pattern]`, or `[resolved]`, or the insight is session-specific (a debugging dead-end, a temporary workaround). `[resolved]` entries are closure records — they belong in memories only, not README.
-
-For each section that has promotable entries, split them by risk:
-
-**Pure append** (the entry adds cleanly — nothing existing needs removing, rewriting, or marking stale/superseded/resolved):
-- Batch all pure-append entries for the same section into one content block (blank-line separated) and write it with a single `update_readme(section="...", content="<batched entries>", mode="append")` call — one call per section, not one per entry.
-- Output one line per entry: `[recall-mcp] Promoted '{tag}' → {section} (auto): {title}.`
-- No approval needed, but calls across different sections MUST run sequentially, never in parallel — `update_readme` does a non-atomic whole-file read-modify-write with no lock, so two calls touching the same README.md (even different sections) racing in parallel silently drop one section's write.
-
-**Removal or consolidation involved** (any existing entry needs removing, merging, or marking superseded/resolved):
-1. Read the current section content from the loaded KB (already in context).
-2. Synthesize: remove stale/superseded entries, integrate the new entries alongside still-valid entries.
-3. Call `update_readme(..., mode="replace")` (confirm defaults to False — writes nothing, returns a real diff).
-4. Show that diff verbatim, then ask "Apply to README `{section}`?"
-5. Only after approval, call `update_readme(...)` again with `confirm=True` (same args) to write. If multiple sections are approved at once, call them **in parallel**.
+Tags S1 does not promote (`[bug]`/`[idea]`/`[pattern]`/`[resolved]`) stay in memories only.
 
 ## Step 10 — Miss check
 
@@ -153,9 +146,8 @@ Before reporting, ask yourself: did a mistake happen this session that a loaded 
 
 ## Step 11 — Report
 
-Run this step only after all Step 9 items are resolved (auto-written, approved, or rejected).
 Show a compact final summary of what actually happened:
 - Saved: bullet list of what was saved (one line each)
-- Promoted: entries that were approved and written to README (section → entry title)
-- Rejected: entries the user declined to promote (if any)
+- Promoted: entries S1 wrote to README (section → entry title), per the promotion notes
+- Skipped/failed promotions: any `⚠️` notes from Step 9, with the reason
 - Skipped: one line explaining what category was left out — not a full list

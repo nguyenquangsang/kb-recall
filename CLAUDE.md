@@ -24,10 +24,24 @@ uv run recall-server    # run locally (stdio mode)
 ## Slash Command Standard
 
 Every `commands/*.md` file must follow `templates/claude-command.md`. Key rules:
-- First line ends with `Argument (optional): **$ARGUMENTS**`
+- First line ends with `Argument (optional): **$ARGUMENTS**` — this is where Claude Code
+  injects the user's argument, so a file that references `$ARGUMENTS` without the marker
+  receives nothing and drops the argument silently
 - `## When to use` with at least one `Never...` boundary
-- Step 1 (slug detection) is boilerplate — copy verbatim from the template
-- Report step required for write commands; omit for read-only
+- Step 1 (slug detection) for any command that resolves a slug from `$ARGUMENTS`. `init`,
+  `link-feature` and `list` correctly skip it — they create a KB, derive one from the git
+  branch, or target none. `load.md` keeps the step but deliberately calls
+  `load_feature_context` directly instead of `list_features` first, to save a round trip;
+  don't "fix" it back to the template
+- Report step required for write commands; omit for read-only. Prose only: `init.md`
+  reports as "Step 3 — Reload KB and suggest next steps" and `link-feature.md` reports
+  inside Step 3A, so neither carries a `Report` heading
+
+`tests/test_commands.py` enforces the mechanical rules above against the real
+`commands/*.md` — change the standard and the test together. Command↔skill parity is
+asserted in BOTH directions (forwards in `tests/test_skills.py`, backwards in
+`tests/test_commands.py`); checking one direction was how a command could ship with no
+skill and still pass CI.
 
 ## MCP Tool Docstring Standard
 
@@ -55,8 +69,8 @@ Never delete the Examples block during a refactor — update the content, keep t
 Claude Code's ToolSearch renders a deferred MCP tool's description with a hard cut around
 ~2000-2150 characters (measured independently twice on this server: 2011-2154 and 2100-2154)
 — regardless of the tool's real docstring length, and with no error signal. Longer docstrings
-lose a *larger fraction*, not a fixed amount: `load_feature_context` at 3933 chars kept ~51%;
-`save_memory` at 7989 chars kept only ~27%. `Args:` is especially at risk — the JSON schema
+lose a *larger fraction*, not a fixed amount: `load_feature_context` at 3536 chars kept ~61%;
+`save_memory` at 2439 chars kept ~88%. `Args:` is especially at risk — the JSON schema
 carries no per-param description outside the docstring text (`parameters.properties` only has
 type/title/default), so a cut before `Args:` means the model never learns what a parameter means.
 
@@ -153,29 +167,29 @@ Entries can be multi-sentence. Skip routine implementation details.
 Write in English — KB content (memories and README sections) must be in English regardless of conversation language.
 Any entry claiming something "doesn't exist / hasn't been built / isn't implemented" must include a `Verify: <grep/rg command you actually ran>` line — absence claims are the easiest to get wrong and the hardest to self-correct once trusted as source of truth.
 
-After saving, if the tag qualifies for promotion, classify it by risk BEFORE answering the user:
-- `[gotcha]` / `[constraint]` → section `critical_warnings`
-- `[decision]` → section `architecture`
-- `[rule]` → section `business_rules`
-- `[bug]`, `[idea]`, `[pattern]`, `[resolved]` → skip by default — unless the content clearly matches another section's shape (e.g. a priority/triage synthesis matches `open_items`'s table, a step sequence matches `checklist`); route it to that section directly instead of skipping
+Promotion to README is automatic at save time — the server writes the block with a
+`<!-- from:XXXX -->` marker; you do not call `update_readme` to promote. After saving,
+read the promotion note in the response and act on it:
+- `Promoted to <section>.` → done; the block landed with its marker.
+- `⚠️ Promotion skipped: …` → act on the stated reason (missing section → add it via
+  `update_readme`; growth ceiling → run `/recall:tidy`). Hand-writing the same content
+  instead is fine, but copy the memory's body verbatim: a verbatim block is recognised
+  and gets its `from:` marker attached, while a paraphrase stays an orphan that no later
+  supersede can replace.
+- `⚠️ Promotion to <section> failed (…)` → the memory saved but promotion failed; fix
+  by hand only if it matters.
 
-**Pure append** (nothing existing needs removing, rewriting, or marking stale/superseded/resolved):
-1. Output one line: `[recall-mcp] Promoted '{tag}' → {section} (auto): {title}.`
-2. Call `update_readme(section="...", content="<new entry block only>", mode="append")` immediately — no approval needed.
+Tags S1 does not promote (`[bug]`/`[idea]`/`[pattern]`/`[resolved]`) stay in memories
+only — unless their content matches another section's shape (e.g. a triage synthesis →
+`open_items` table), in which case route it there via `update_readme` directly.
 
-**Removal or consolidation involved** (any existing entry needs removing, merging, or marking superseded/resolved):
-1. Output one line: `[recall-mcp] Promoting '{tag}' → {section}.`
-2. Read the current section content from the loaded KB (already in context).
-3. Synthesize: remove stale/superseded entries, integrate the new memory alongside still-valid entries.
-4. Call `update_readme(section="...", content="<synthesized>", mode="replace")` — `confirm` defaults to False, so this writes nothing and returns a real diff instead.
-5. Show that diff verbatim — wrapped in a ```diff fenced code block for red/green coloring, never your own paraphrase — then ask "Apply to README `{section}`?"
-6. Only after approval, call `update_readme(...)` again with `confirm=True` (same args) to actually write.
+After saving a `[decision]` — also scan `open_items`: if any row is resolved or rejected by this decision, show the updated table and ask "Apply to README `open_items`?" before calling `update_readme` — marking a row resolved always needs approval, never auto-write it.
 
-After promoting a `[decision]` — also scan `open_items`: if any row is resolved or rejected by this decision, show the updated table and ask "Apply to README `open_items`?" before calling `update_readme` — marking a row resolved always needs approval, never auto-write it.
-
-After either promotion path succeeds, check whether the README content now fully captures the source memory's What/Why/Apply:
-- **Fully captured**: ask "Mark the source memory (`id:XXXX`) as resolved now that it's promoted to README `{section}`?" — show the one-line closure note you'd write. Only on approval, call `save_memory(slug="<slug>", content="[resolved:XXXX] Promoted to README {section}: <one-line>")`. This matters because `[gotcha]`/`[decision]`/`[rule]` memories are always full-loaded (never index-only, see `load_feature_context`'s tag-tier pagination) — an unresolved duplicate of already-promoted content is pure wasted context on every future load.
-- **README trimmed or paraphrased real reasoning out** (Why/Apply detail didn't make it in): don't ask to resolve — say so explicitly, since resolving would lose that detail (only the short closure line survives in the merged view; the raw memories-*.md file still has it, but recall-mcp's own guidance is not to read those directly).
+A promoted memory is auto-hidden from future loads while its README block remains a verbatim
+copy — the loader treats the block as the source of truth, so do NOT write `[resolved:XXXX]`
+after a promotion. `[resolved:XXXX]` is only for something dealt with that has no README block
+(e.g. a `[bug]` fixed in code). If a later `update_readme` trims the block, the loader notices
+(the verbatim check fails) and keeps the memory body automatically — no manual action needed.
 
 Then answer the user's question normally.
 

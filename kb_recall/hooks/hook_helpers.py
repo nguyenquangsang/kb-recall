@@ -4,6 +4,7 @@ Extracted for testability — no module-level side effects here.
 All functions receive their dependencies as parameters.
 """
 
+import contextlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,13 +40,17 @@ def mark_asked(sid: str, slug: str, state_file: Path) -> None:
 def append_turn(sid: str, state_file: Path) -> None:
     """Append one __turn__ entry — intentionally not deduped, used as a counter.
 
-    Also stamps a wall-clock `ts` (ISO 8601 UTC) — a self-controlled fallback for
-    idle-gap detection when the transcript JSONL can't be read/parsed (its schema
-    isn't officially documented by Claude Code, so it shouldn't be the only source).
+    Also stamps a wall-clock `ts` (ISO 8601 UTC) and a running `n`. `n` is the
+    counter itself, NOT the number of lines on disk: the state file is trimmed to
+    its last 500 lines, so counting lines would plateau at exactly 500 and both
+    reminder cadences (which gate on `calls % N == 0`) would die silently for the
+    rest of a long session — 500 % 16 ≠ 0 and 500 % 80 ≠ 0. Storing `n` lets
+    `count_turns` return the true total even after the trim.
     """
     entry = {
         "session_id": sid,
         "slug": "__turn__",
+        "n": count_turns(sid, state_file) + 1,
         "ts": datetime.now(timezone.utc).isoformat(),
     }
     with state_file.open("a") as f:
@@ -163,10 +168,8 @@ def parse_transcript_idle(transcript_path: str):
             )
             if is_real_prompt:
                 ts_str = entry.get("timestamp", "")
-                try:
+                with contextlib.suppress(Exception):
                     last_user_ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                except Exception:
-                    pass
 
         if last_usage is None and entry.get("type") == "assistant":
             usage = entry.get("message", {}).get("usage")
@@ -236,7 +239,9 @@ def parse_pipe_table(text: str) -> list[dict]:
             continue  # separator row
         if len(cols) < len(header):
             continue  # malformed row — fewer cells than header
-        rows.append(dict(zip(header, cols)))
+        # `cols` may carry trailing padding beyond the header; `strict=True` would
+        # turn that tolerated shape into a ValueError.
+        rows.append(dict(zip(header, cols, strict=False)))
     return rows
 
 
@@ -308,9 +313,16 @@ def pick_active_slug(asked: set) -> str | None:
 
 
 def count_turns(sid: str, state_file: Path) -> int:
+    """Return the turn count for this session.
+
+    Prefers the running `n` counter (which survives the 500-line trim — see
+    append_turn); falls back to counting lines for entries written before `n`
+    existed (or by older clients), so a mixed file still counts correctly.
+    """
     if not state_file.exists():
         return 0
-    count = 0
+    max_n = 0
+    line_count = 0
     for line in state_file.read_text().splitlines():
         line = line.strip()
         if not line:
@@ -318,7 +330,10 @@ def count_turns(sid: str, state_file: Path) -> int:
         try:
             entry = json.loads(line)
             if entry.get("session_id") == sid and entry.get("slug") == "__turn__":
-                count += 1
+                line_count += 1
+                n = entry.get("n")
+                if isinstance(n, int) and n > max_n:
+                    max_n = n
         except Exception:
             pass
-    return count
+    return max_n if max_n else line_count

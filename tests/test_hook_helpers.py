@@ -1,6 +1,5 @@
 import json
 
-
 from kb_recall.hooks.hook_helpers import (
     append_turn,
     count_turns,
@@ -118,6 +117,13 @@ class TestAppendTurn:
         append_turn(SID, state)
         assert len(state.read_text().splitlines()) == 500
 
+    def test_turn_entry_carries_running_count(self, tmp_path):
+        state = tmp_path / "state"
+        append_turn(SID, state)
+        append_turn(SID, state)
+        entry = json.loads(state.read_text().splitlines()[-1])
+        assert entry["n"] == 2
+
 
 # ---------------------------------------------------------------------------
 # count_turns
@@ -148,6 +154,18 @@ class TestCountTurns:
             "bad-json\n" + json.dumps({"session_id": SID, "slug": "__turn__"}) + "\n"
         )
         assert count_turns(SID, state) == 1
+
+    def test_count_survives_the_500_line_trim(self, tmp_path):
+        """Regression (2026-09-26): the trim to 500 lines used to plateau the
+        counter at exactly 500, silently killing both reminder cadences (500 % 16
+        and 500 % 80 are both non-zero). The running `n` counter must keep counting
+        past the trim."""
+        state = tmp_path / "state"
+        for _ in range(600):
+            append_turn(SID, state)
+        assert count_turns(SID, state) == 600
+        # The on-disk file is still capped, but the counter is not.
+        assert len(state.read_text().splitlines()) == 500
 
 
 # ---------------------------------------------------------------------------

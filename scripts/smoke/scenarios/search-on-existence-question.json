@@ -1,0 +1,10 @@
+{
+  "name": "search-on-existence-question",
+  "description": "Asked whether something was already handled elsewhere, the model searches before answering instead of answering from the loaded KB alone.",
+  "why": "The trigger is meant to be detectable from the user's own words — 'was this already done', 'did anyone hit this bug'. A model that answers from the currently-loaded KB without searching answers confidently and wrongly.",
+  "setup": "Run from a branch whose KB does not itself contain the answer, so a correct response requires reaching another KB.",
+  "prompt": "Before we change the promotion logic — has anything like this deduplication problem already been hit somewhere else in this project? I want to avoid re-litigating a decision we already made.",
+  "requires": [["search_features"]],
+  "forbids": [],
+  "min_calls": 1
+}

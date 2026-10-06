@@ -80,6 +80,7 @@ Reserved slug keys (dedup guards):
   __turn__           — written every run, NOT deduped; raw count = turn number (per session)
 """
 
+import contextlib
 import json
 import os
 import random
@@ -191,7 +192,7 @@ def _kb_stats(kb_root: Path, project_name: str, slug: str) -> str:
 
 def main() -> None:
     if not CFG.exists():
-        exit()
+        sys.exit()
 
     # Read session_id from stdin (Claude Code passes JSON on UserPromptSubmit)
     payload = {}
@@ -206,16 +207,14 @@ def main() -> None:
     transcript_path = payload.get("transcript_path", "")
 
     if session_id:
-        try:
+        with contextlib.suppress(Exception):
             (KB_ROOT / "current-session").write_text(session_id)
-        except Exception:
-            pass
 
     try:
         data = json.loads(CFG.read_text())
     except Exception as e:
         print(f"[recall-mcp] ⚠ config.json malformed ({e}) — fix {CFG}")
-        exit()
+        sys.exit()
     projects = [Path(p).resolve() for p in data.get("projects", [])]
     block_idle = data.get("block_idle", True)
 
@@ -381,6 +380,7 @@ def main() -> None:
                 text=True,
                 timeout=3,
                 cwd=str(cwd),
+                check=False,  # a missing git or a detached HEAD just yields ""
             ).stdout.strip()
 
             if branch and branch not in ("main", "master", "develop", "dev"):
@@ -473,6 +473,10 @@ def main() -> None:
                             )
                             print("If 2: run /recall:link-feature")
                             print("If neither: do nothing.")
+                            print(
+                                "Do NOT load a candidate KB before the user chooses — "
+                                "loading presumes the mapping, and it is the user's call."
+                            )
         except Exception:
             pass
 

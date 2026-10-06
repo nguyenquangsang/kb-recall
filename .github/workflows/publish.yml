@@ -1,16 +1,27 @@
 name: Publish to PyPI
 
+# Triggered by publishing a GitHub Release, not by a tag push. A tag is only a
+# pointer: `git tag v0.2.0 && git push origin v0.2.0` fires a push trigger even
+# when the tag points at an unreviewed feature-branch commit — and RELEASING.md
+# used to tell you to do exactly that. Publishing a release is a deliberate act
+# with the target branch shown in the form, so a stray tag now publishes nothing.
+# Keep `types: [published]`: it fires for a normal publish *and* for promoting a
+# pre-release, which a `released`-only filter would miss.
+#
+# Residual gap, accepted deliberately: the release form's Target dropdown still
+# accepts any branch, so a wrong selection here is not caught. Closing that would
+# need an ancestry check against origin/main, which costs a full-history checkout
+# and would block releasing from a future maintenance branch.
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 jobs:
   # Reuse the workflow that gates every PR rather than keeping a second copy of
-  # the test steps here. A tag push is the one event that cannot be cheaply
-  # redone — once a version is on PyPI it can never be re-uploaded under the same
-  # number — so the tests get re-run on exactly the tagged commit, not assumed
-  # from whatever the branch looked like at review time.
+  # the test steps here. Publishing a release is the one event that cannot be
+  # cheaply redone — once a version is on PyPI it can never be re-uploaded under
+  # the same number — so the tests get re-run on exactly the tagged commit, not
+  # assumed from whatever the branch looked like at review time.
   ci:
     uses: ./.github/workflows/ci.yml
 
@@ -25,6 +36,28 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
+
+      # RELEASING.md's step 5 is the one release step nothing used to check: a tag that
+      # disagrees with `version` publishes a number nobody chose, under a tag that cannot
+      # be corrected — PyPI never allows re-uploading a version. Fail here, before the
+      # build, so a mismatch costs one job instead of a burned version number.
+      # `uv version --short` reads the real TOML; the grep is a fallback in case a future
+      # runner ships a uv too old for that subcommand.
+      # GITHUB_REF is `refs/tags/<tag>`. The docs list GITHUB_REF for a `release` event
+      # but not GITHUB_REF_NAME, so strip the ref prefix rather than trust the short-name
+      # variable — this form is correct on both a release event and a tag push. Two
+      # strips, not one: `${GITHUB_REF#refs/tags/v}` would be a literal `v`, and the
+      # original `${GITHUB_REF_NAME#v}` accepted a tag with or without the prefix.
+      - name: Verify tag matches project version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          tag="${tag#v}"
+          version="$(uv version --short 2>/dev/null || grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::Tag ${GITHUB_REF} does not match version ${version} in pyproject.toml"
+            exit 1
+          fi
+          echo "Tag ${tag} matches version ${version}."
 
       - name: Build package
         run: uv build

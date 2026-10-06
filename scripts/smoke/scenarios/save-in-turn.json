@@ -1,0 +1,10 @@
+{
+  "name": "save-in-turn",
+  "description": "The model saves a newly discovered root cause in the same turn it learns it, rather than deferring to the end of the session.",
+  "why": "Deferred saves are forgotten — the KB's own rule says so. A model that acknowledges the finding but never writes it down looks identical to a compliant one in the transcript, and is only visible in usage.jsonl.",
+  "setup": "Run from a branch with a KB loaded. The prompt states a root cause as established fact, not as a question, so the save is unambiguously warranted.",
+  "prompt": "Turned out the real issue is that Redis maxconn=10 is per-process, not global — the connection pool exhausts silently under concurrent load. That's why the incident happened. Given that, which of these two fixes do you think is safer?",
+  "requires": [["save_memory"]],
+  "forbids": [],
+  "min_calls": 1
+}

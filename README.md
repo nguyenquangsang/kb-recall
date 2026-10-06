@@ -6,7 +6,7 @@
 
 ![Starting a session — the hook reads the branch and loads the matching KB before the first prompt](https://raw.githubusercontent.com/nguyenquangsang/kb-recall/main/images/4-load-kb.gif)
 
-Persistent memory for Claude Code, scoped to the feature you're working on and shareable with the rest of your team — and measured, because context is a budget.
+Persistent memory for Claude Code and GitHub Copilot, scoped to the feature you're working on and shareable with the rest of your team — and measured, because context is a budget.
 
 ## Table of Contents
 
@@ -14,11 +14,13 @@ Persistent memory for Claude Code, scoped to the feature you're working on and s
 - [The problem](#the-problem)
 - [What makes this different](#what-makes-this-different)
 - [Installation](#installation)
+- [Changelog](CHANGELOG.md)
 - [Configuration](#configuration)
 - [KB structure](#kb-structure)
 - [How it works](#how-it-works)
 - [Tools](#tools)
 - [Slash commands](#slash-commands)
+- [GitHub Copilot](#github-copilot)
 - [Version history](#version-history)
 - [Design notes](#design-notes)
 - [Development](#development)
@@ -28,21 +30,22 @@ Persistent memory for Claude Code, scoped to the feature you're working on and s
 
 ## 30-Second Quickstart Walkthrough
 
-Three commands, one reload, and Claude stops starting from scratch.
+Three commands, one reload, and your agent stops starting from scratch.
 
 ```bash
 uv tool install kb-recall     # 1. install the CLI — isolated env, exposes one `recall` command
 cd ~/your-project             # 2. `recall setup` is per-project — cd into the target first
 recall setup                  # 3. register MCP server + config + CLAUDE.local.md + hook
+recall setup --platform copilot   # 3b. (optional) Copilot: MCP config + hooks + Agent Skills
 ```
 
-Reload Claude Code, then open a session on a feature branch. There is no load command to remember — the `UserPromptSubmit` hook reads your branch and loads the matching KB as the session opens. That is the moment in the GIF above. If the branch matches no known KB, Claude offers to create one (`/recall:init`) or link an existing one (`/recall:link-feature`).
+Reload your client, then open a session on a feature branch. There is no load command to remember — the session hook reads your branch and loads the matching KB as the session opens. That is the moment in the GIF above. If the branch matches no known KB, your agent offers to create one (`/recall:init`) or link an existing one (`/recall:link-feature`).
 
-Verify the install with `recall --help`. The full walkthrough, with a screenshot per step, is in [GUIDE.md](GUIDE.md).
+Verify the install with `recall --help`. The full walkthrough, with a screenshot per step, is in [GUIDE.md](GUIDE.md). For Copilot, see [GitHub Copilot](#github-copilot).
 
 ## The problem
 
-Claude is capable within a session but forgets everything between sessions. Each new conversation starts from scratch: no knowledge of past bugs, no memory of architecture decisions, no awareness of the edge cases you already discovered.
+Your agent is capable within a session but forgets everything between sessions. Each new conversation starts from scratch: no knowledge of past bugs, no memory of architecture decisions, no awareness of the edge cases you already discovered.
 
 Pasting context into every session is tedious and incomplete. And putting it in `CLAUDE.md` loads all of it, every session — one file per repo, speaking to everything at once, so a `payment-gateway` session pays for auth context it will never touch. Neither records anything either: whatever a session teaches you is gone unless you stop, notice, and write it down yourself.
 
@@ -51,10 +54,10 @@ Pasting context into every session is tedious and incomplete. And putting it in 
 Most memory layers ask one question: _did it remember?_ This one asks four — _was it even the right memory to load_, _did anyone have to write it down_, _who else gets to use it_. Every mechanism here spends tokens, so every mechanism is measured.
 
 - **Feature-scoped, not project-scoped — and your branch picks for you.** `CLAUDE.md` is one file per repo and it speaks to everything at once, so every session loads all of it. A KB is per feature, and the hook reads branch and loads the matching one as the session opens: a `payment-gateway` session never pays for the auth context. Switch branches and you switch KBs — there is no load command to remember.
-- **The KB is written while you work — you never take notes.** Claude calls `save_memory` in the turn it learns something, not at the end when the context is gone: a root cause, a constraint the code doesn't show, an approach tried and rejected, a decision with non-obvious reasoning. What lands is tagged, dated, and attributed to the journal it came from.
-- **Capture is automatic; promotion is gated.** The two layers are built for opposite jobs. A memory is cheap and additive by construction — prepend-only, never edited, never deleted — so a write Claude makes on its own cannot damage the KB. The curated `README.md` is the opposite: a `[gotcha]`, `[rule]` or `[decision]` reaches it only through a risk-classified promotion, and anything that would remove, merge or supersede an existing entry comes back as a diff to review _before_ it is written.
+- **The KB is written while you work — you never take notes.** Your agent calls `save_memory` in the turn it learns something, not at the end when the context is gone: a root cause, a constraint the code doesn't show, an approach tried and rejected, a decision with non-obvious reasoning. What lands is tagged, dated, and attributed to the journal it came from.
+- **Capture is automatic; promotion is gated.** The two layers are built for opposite jobs. A memory is cheap and additive by construction — prepend-only, never edited, never deleted — so a write the agent makes on its own cannot damage the KB. The curated `README.md` is the opposite: a `[gotcha]`, `[rule]` or `[decision]` reaches it only through a risk-classified promotion, and anything that would remove, merge or supersede an existing entry comes back as a diff to review _before_ it is written.
 - **None of it is locked in a service — a KB is plain markdown.** A feature's KB is a few `.md` files. Read it with `cat`, grep it from a script, diff it in a PR. No database, no daemon, no vendor account standing between your team and its own knowledge.
-- **One journal per contributor, so a team's findings accumulate instead of overwriting.** Each engineer's Claude writes to that engineer's own `memories-{username}.md`, while the shared `README.md` holds only what the team has agreed on. `load_feature_context` merges every contributor's journal present in the KB, chronologically, at read time — work one engineer did last week is in front of the next engineer this week — and because no two people write the same file, simultaneous saves never conflict.
+- **One journal per contributor, so a team's findings accumulate instead of overwriting.** Each engineer's agent writes to that engineer's own `memories-{username}.md`, while the shared `README.md` holds only what the team has agreed on. `load_feature_context` merges every contributor's journal present in the KB, chronologically, at read time — work one engineer did last week is in front of the next engineer this week — and because no two people write the same file, simultaneous saves never conflict.
 - **Shareable by `git push`, scoped so sharing stays safe.** `~/.recall-mcp/<project>/` is a git repo from the first write, so handing a KB to your team is a push to a remote you control; and the repo is scoped per _project_, not per feature, so one push carries that project's KBs and never another project's. kb-recall only ever runs `git init` — committing stays yours.
 - **Cost guards, not just features.** The `UserPromptSubmit` hook will block a prompt outright rather than let a session resume into an expired prompt cache with a large context — paying a full cache-write is worse than not running at all. See [Idle-gap cost guard](#idle-gap-cost-guard).
 
@@ -78,7 +81,7 @@ uv tool install git+https://github.com/nguyenquangsang/kb-recall.git
 
 Either way, `uv tool install` installs into its own isolated environment and exposes a single `recall` command (`~/.local/bin/recall` by default) — no manual `git clone` needed for the GitHub source either. This matters beyond convenience: the `UserPromptSubmit` hook runs `recall prompt`, and because the tool's environment is isolated and self-contained, that command reaches the right interpreter no matter which project's venv (if any) happens to be active in the calling shell — unlike invoking a bare `python3 /path/to/prompt_submit.py`, which only works when the ambient `python3` happens to be kb-recall's own interpreter.
 
-`recall setup` writes the hook using the **absolute path** to that executable rather than the bare name. Claude Code spawns hook commands through a shell that does not source your interactive rc (`.zshrc`), so a bare `recall` — which resolves only because `.zshrc` puts `~/.local/bin` on `PATH` — would match nothing there and the hook would fail silently, injecting no context and printing no error.
+`recall setup` writes the hook using the **absolute path** to that executable rather than the bare name. Both harnesses (Claude Code and Copilot) spawn hook commands through a shell that does not source your interactive rc (`.zshrc`), so a bare `recall` — which resolves only because `.zshrc` puts `~/.local/bin` on `PATH` — would match nothing there and the hook would fail silently, injecting no context and printing no error.
 
 Verify:
 
@@ -101,7 +104,7 @@ cd ~/your-project
 recall setup
 ```
 
-This registers the MCP server, adds the project to config, writes `CLAUDE.local.md` (gitignored, per-developer — not the team-shared `CLAUDE.md`), and installs the hook. Reload Claude Code after. See [Setup checklist](#setup-checklist) for what each step does.
+This registers the MCP server, adds the project to config, writes `CLAUDE.local.md` (gitignored, per-developer — not the team-shared `CLAUDE.md`), and installs the hook. Reload your client after. See [Setup checklist](#setup-checklist) for what each step does.
 
 `recall setup` detects the target project from the current working directory (`Path.cwd()`) — always `cd` into the target project first.
 
@@ -126,13 +129,15 @@ recall block-idle true    # re-enable (default)
 
 This writes `"block_idle": false` to `config.json`. See GUIDE.md's "Idle-gap cost guard" section for the full tier breakdown.
 
+> **Claude Code only.** This guard works by blocking a turn, and Copilot's prompt-time event is mutation-only — it can rewrite what the model receives but cannot stop the turn. There is no Copilot equivalent; see [GitHub Copilot](#github-copilot).
+
 ## KB structure
 
 ```
 ~/.recall-mcp/
 ├── config.json
 ├── usage.log                        ← every tool call, human-readable (tail -f friendly)
-├── usage.jsonl                      ← same data as JSON Lines, for jq/pandas/Claude analysis
+├── usage.jsonl                      ← same data as JSON Lines, for jq/pandas/LLM analysis
 └── my-project/
     ├── .git/                        ← one repo per project, created on first write
     ├── features.md                  ← index of all features
@@ -154,9 +159,9 @@ An index file (`features.md`) lists all KBs for quick discovery.
 
 The KB lives in `~/.recall-mcp/` — completely outside the project repo. It never gets committed accidentally, and you can version it independently by committing to that project's KB repo.
 
-Claude reads and writes these files via 8 MCP tools. No manual file management needed.
+Your agent reads and writes these files via 8 MCP tools. No manual file management needed.
 
-Every tool call is logged to two files: `usage.log` (human-readable, `tail -f` friendly) and `usage.jsonl` (JSON Lines for analysis with `jq`, pandas, or Claude). `~/.recall-mcp/<project-name>/` is initialized as a git repo automatically on first write — `git init` only, kb-recall itself never auto-commits. That scope is deliberate: one repo per project, not one for all of `~/.recall-mcp/`, so sharing one project's KB with its team never carries another project's KB along with it. This leaves it ready for you to commit/push manually if you want to version or share the KB.
+Every tool call is logged to two files: `usage.log` (human-readable, `tail -f` friendly) and `usage.jsonl` (JSON Lines for analysis with `jq`, pandas, or an LLM). `~/.recall-mcp/<project-name>/` is initialized as a git repo automatically on first write — `git init` only, kb-recall itself never auto-commits. That scope is deliberate: one repo per project, not one for all of `~/.recall-mcp/`, so sharing one project's KB with its team never carries another project's KB along with it. This leaves it ready for you to commit/push manually if you want to version or share the KB.
 
 ## Tools
 
@@ -170,7 +175,7 @@ list_features(project="")
 
 ### `search_features`
 
-Keyword search across every feature's `README.md` and `memories-*.md` (all contributors) in scope. Space-separated keywords are OR-matched, case-insensitive. Returns lightweight snippets grouped by slug — not full content. Use this to check a specific fact that might live in a feature you aren't currently working in (e.g. "was X already done elsewhere"); not for slug discovery, which `list_features` already covers. Pass a comma-separated list (`"proj-a,proj-b"`) to search a specific subset of projects, or `"all"` for every configured project — only when the user explicitly asks for a cross-project search; default stays scoped to the current project in every other case. Claude should not decide subset-vs-all on its own either — ask the user, offering the real configured project names as choices. Multi-project results are prefixed `<project>/<slug>`; the footer instructs Claude to show that list to the user and let them pick which KB to load, rather than deciding on its own.
+Keyword search across every feature's `README.md` and `memories-*.md` (all contributors) in scope. Space-separated keywords are OR-matched, case-insensitive. Returns lightweight snippets grouped by slug — not full content. Use this to check a specific fact that might live in a feature you aren't currently working in (e.g. "was X already done elsewhere"); not for slug discovery, which `list_features` already covers. Pass a comma-separated list (`"proj-a,proj-b"`) to search a specific subset of projects, or `"all"` for every configured project — only when the user explicitly asks for a cross-project search; default stays scoped to the current project in every other case. The agent should not decide subset-vs-all on its own either — ask the user, offering the real configured project names as choices. Multi-project results are prefixed `<project>/<slug>`; the footer instructs the agent to show that list to the user and let them pick which KB to load, rather than deciding on its own.
 
 ```
 search_features(query="webhook retry idempotent", project="")
@@ -188,7 +193,7 @@ load_feature_context(slug="payment-gateway", project="")
 
 ### `save_memory`
 
-Prepends a single engineering insight to the current user's `memories-{username}.md`, dated today. Only call this for significant findings: bugs, edge cases, trade-off decisions, breaking changes. Skip routine implementation details. After saving, check whether to promote to README: `[gotcha]`/`[constraint]` → `update_readme(section="critical_warnings", mode="append")`; `[decision]` → `update_readme(section="architecture", mode="append")`; `[rule]` → `update_readme(section="business_rules", mode="append")`. Skip promotion for `[bug]`, `[idea]`, and `[pattern]`.
+Prepends a single engineering insight to the current user's `memories-{username}.md`, dated today. Only call this for significant findings: bugs, edge cases, trade-off decisions, breaking changes. Skip routine implementation details. Promotion to README is automatic at save time: `[gotcha]`/`[constraint]` → `critical_warnings`, `[decision]` → `architecture`, `[rule]` → `business_rules`; `[bug]`/`[idea]`/`[pattern]` stay in memories only.
 
 ```
 save_memory(slug="payment-gateway", content="Stripe webhooks can arrive out of order — always reconcile against DB state, not event order.")
@@ -229,10 +234,10 @@ update_feature_index(slug="payment-gateway", field="branch", value="feat/payment
 
 ### `report_miss`
 
-Records a context miss — a mistake Claude made that the KB should have prevented. Call this when the user points out that Claude ignored or lacked knowledge that should have been in the KB. Saves a `[MISS]` entry to `memories-{username}.md` so the gap is visible and can be fixed. Immediately after, call `update_readme` on the section the miss revealed as missing — do not stop at recording the miss.
+Records a context miss — a mistake the agent made that the KB should have prevented. Call this when the user points out that the agent ignored or lacked knowledge that should have been in the KB. Saves a `[MISS]` entry to `memories-{username}.md` so the gap is visible and can be fixed. Immediately after, call `update_readme` on the section the miss revealed as missing — do not stop at recording the miss.
 
 ```
-report_miss(slug="payment-gateway", description="Forgot that webhooks can arrive out of order — this was already in README but Claude didn't apply it.")
+report_miss(slug="payment-gateway", description="Forgot that webhooks can arrive out of order — this was already in README but the agent didn't apply it.")
 ```
 
 ## Slash commands
@@ -257,6 +262,8 @@ recall sync-commands
 ```
 
 Reload Claude Code. If you're working from a clone of this repo (editable install), `recall sync-commands` symlinks `commands/*.md` into `~/.claude/commands/recall/` — edit the source files and changes take effect immediately (no reload needed). Falls back to copying if your filesystem doesn't support symlinks; re-run `recall sync-commands` after editing in that case.
+
+On Copilot the same eight exist as Agent Skills, invoked without the colon — `/recall-load`, `/recall-save`, `/recall-list`, `/recall-init`, `/recall-miss`, `/recall-link-feature`, `/recall-compact`, `/recall-tidy` — and the argument is passed after the command rather than interpolated: `/recall-save webhook ordering note`. Installed by `recall setup --platform copilot`; see [GitHub Copilot](#github-copilot).
 
 ## Version history
 
@@ -284,18 +291,22 @@ uv sync                 # install deps
 uv run recall-server    # run locally (stdio mode)
 ```
 
-Feature KB templates live in `kb_recall/templates/` — edit them to change what `init_feature` generates. Six files: `feature-README.md` and `feature-memories.md` (the per-feature KB), `features-index.md` (the project index), `claude-md-snippet.md` (the CLAUDE.md section shown when a project isn't configured), `claude-command.md` (the standard every `commands/*.md` file follows), and `claude-settings.json`.
+Feature KB templates live in `kb_recall/templates/` — edit them to change what `init_feature` generates. Eight files: `feature-README.md` and `feature-memories.md` (the per-feature KB), `features-index.md` (the project index), `claude-md-snippet.md` (the CLAUDE.md section shown when a project isn't configured), `claude-command.md` (the standard every `commands/*.md` file follows), `copilot-skill.md` (the standard every `skills/*/SKILL.md` file follows), `copilot-instructions.md` (the instructions file `recall setup --platform copilot` writes), and `claude-settings.json`.
 
 Tests and lint:
 
 ```bash
-uv run pytest        # 174 tests: hook helpers, CLI, server tools, prompt_submit
-uv run ruff check
+uv run pytest        # 437 tests: hook helpers, CLI, server tools, prompt_submit,
+                     # commands + skills contracts, Copilot adapter, smoke scorer,
+                     # docstring contract, end-to-end lifecycle, stdio smoke
+uv run ruff check kb_recall tests scripts
 ```
+
+Repo-local agents live in `.github/agents/` — VS Code loads every `.md` file in that folder as a custom agent. `kb-audit` audits this project's own KB for stale or unverifiable entries; its tool list is an allowlist of read tools plus the three read-only MCP tools, so it reports findings but cannot write to the KB.
 
 ## Setup checklist
 
-Several things must be in place for Claude to reliably use kb-recall. `recall setup` automates all of them — run it once per project.
+Several things must be in place for your agent to reliably use kb-recall. `recall setup` automates all of them — run it once per project.
 
 ```bash
 cd ~/your-project
@@ -325,21 +336,78 @@ This is the only hook kb-recall installs. (An earlier design also used a `PreCom
 
 Reload Claude Code after setup.
 
+`recall setup --platform copilot` runs only steps 2, 3 and 5b (its own MCP config, hooks and Agent Skills) and never touches `~/.claude/`; `--platform all` runs both. Copilot details: [GitHub Copilot](#github-copilot).
+
+---
+
+## GitHub Copilot
+
+kb-recall runs on GitHub Copilot in VS Code alongside Claude Code. Both clients share the **same KB store** (`~/.recall-mcp/`), so a project's knowledge serves whichever agent you happen to be using — no second setup, no second copy to keep in sync.
+
+```bash
+cd ~/your-project
+recall setup --platform copilot    # or --platform all, for both clients
+```
+
+Reload VS Code and start a **new** chat session — the auto-load hook runs at session start, so a session that is already open will not see it.
+
+| What it writes           | Where                             | Why                                                      |
+| ------------------------ | --------------------------------- | -------------------------------------------------------- |
+| MCP server config        | `.mcp.json` (project root)        | exposes the tools over stdio; gitignored                 |
+| Session + per-turn hooks | `.github/hooks/recall.json`       | absolute path to `recall-copilot-hook`; gitignored       |
+| Instructions             | `.github/copilot-instructions.md` | skipped when `CLAUDE.local.md` already carries the rules |
+| Agent Skills ×8          | `~/.copilot/skills/` (symlinked)  | user-scope, mirroring `~/.claude/commands/recall/`       |
+
+The two machine-specific files are gitignored because they hold absolute paths — each developer runs `recall setup --platform copilot` once, exactly as they already run `recall setup` for Claude Code.
+
+> **Enable `.mcp.json` first.** VS Code Stable defaults `chat.mcp.workspaceRootConfig.enabled` to `false`, which makes it ignore `.mcp.json` **silently** — the agent has no tools and reports no error. Turn it on in Settings, or add the server through the MCP UI.
+
+<details>
+<summary><strong>Three gaps versus Claude Code</strong> — and what to do about them</summary>
+
+**1. No idle-gap cost guard.** The Claude-side guard works by blocking a turn; Copilot's prompt-time event is mutation-only, so there is nothing to block with. Per-turn reminders still exist, but they come from the post-tool-use hook instead.
+
+**2. No reload when you switch branches mid-session.** Auto-load fires once, at session start. Switch to another feature branch in the same session and the previous KB stays in context — ask for the new one explicitly (`/recall-load`). This is the one case where "there is no load command to remember" does not hold.
+
+**3. Auto-load is partial, not the whole KB.** The injected context is capped at 10 KB. A larger KB is truncated at a section boundary and carries a line telling the agent to call `load_feature_context` for the rest. Sections render in priority order, so rules arrive before the journal — but for a big KB expect one follow-up tool call before the agent has the full picture.
+
+**Per-turn reminders count tool calls, not turns.** Copilot's post-tool-use payload has no turn identifier, so the cadence is measured in matched tool calls (every 16). A turn that only reasons and answers — calling no tools — gets no reminder, and the counter resets each session.
+
+</details>
+
+<details>
+<summary><strong>Verified on VS Code Local</strong> — what was tested end-to-end, and what was not</summary>
+
+Tested on VS Code 1.139.1 / copilot-agent 0.67.0, 2026-09-25 → 2026-09-26:
+
+- `sessionStart` fires and its `additionalContext` is honored — the model quoted an injected codeword back verbatim, and the injected context persists across later turns, not just the first.
+- `postToolUse` fires on real sessions (~2 state entries per tool call), so the reminder channel is live.
+- The MCP tools are reachable from a Copilot session, and `.mcp.json` parses in both wrapped and bare forms.
+- The generated hook config is accepted — an unknown event key is skipped per entry, silently, without invalidating the file.
+
+**Documented, not inferred:** the Local harness parses `matcher` for Claude compatibility and then **ignores its value**, so the hook runs on every tool call. That is consistent with the ~2 state entries per tool call measured here. The effect is bounded — counting more calls means reminders arrive earlier, never later, never silently absent.
+
+**Skill names cannot carry a namespace.** `/recall:load` is not a style choice we skipped: the format allows only lowercase letters, digits and hyphens in a skill's `name`, which must also equal its directory name, and an invalid name makes the skill **silently fail to load**. The colon form becomes available only when skills ship inside an agent plugin — the harness then prefixes the plugin name (`/my-plugin:test-runner`) on its own. So kb-recall's `/recall-load` is a hand-rolled stand-in for a prefix the format will not let us declare.
+
+One dead end, recorded so nobody re-tests it: `userPromptTransformed` never fires on VS Code Local. It is a Copilot **CLI** event, and VS Code's own prompt event has no context-injection field — "prompt-time injection on VS Code" is not a missing feature, there is no such channel. Live reference: [VS Code hooks reference](https://code.visualstudio.com/docs/agents/reference/hooks-reference).
+
+</details>
+
 ---
 
 ## Known problems
 
 ### Current (unfixed)
 
-**Reliability** — Claude has no guarantee it will call `load_feature_context` before starting work. The hook injects the feature index, and CLAUDE.md rules instruct the behavior — but both are advisory. Claude can skip them. There is no hard enforcement mechanism at the protocol level.
+**Reliability** — the agent has no guarantee it will call `load_feature_context` before starting work. The hook injects the feature index, and CLAUDE.md rules instruct the behavior — but both are advisory. The agent can skip them. There is no hard enforcement mechanism at the protocol level.
 
-**No session-end checkpoint** — _(partially addressed)_ A turn counter reminder fires every 8 turns, prompting Claude to call `save_memory` (and a separate one every 16 turns for `report_miss`). Claude can still finish a session without saving if it ignores these signals.
+**No session-end checkpoint** — _(partially addressed)_ A turn counter reminder fires every 8 turns, prompting the agent to call `save_memory` (and a separate one every 16 turns for `report_miss`). The session can still finish without saving if the agent ignores these signals. On Copilot the reminder is keyed to tool calls rather than turns, so a turn that calls no tools gets no reminder at all.
 
 ### Future (when KB grows or work spans features)
 
-**Cross-feature blind spots** — each feature KB is isolated. When work touches two features, Claude must know in advance to load both. Two hint-on-load mechanisms exist: a curated `<related_tickets>` section, and `key_files` overlap mined live from every KB's `<key_files>` section, which surfaces "Possibly related (shared key_files, unconfirmed)" split into `strong` (ordinary overlap, or an exact shared `path::symbol`) and `weak` (the path is a hub, referenced by many features). Both are advisory — Claude can ignore them, and neither fires unless a KB is already being loaded.
+**Cross-feature blind spots** — each feature KB is isolated. When work touches two features, the agent must know in advance to load both. Two hint-on-load mechanisms exist: a curated `<related_tickets>` section, and `key_files` overlap mined live from every KB's `<key_files>` section, which surfaces "Possibly related (shared key_files, unconfirmed)" split into `strong` (ordinary overlap, or an exact shared `path::symbol`) and `weak` (the path is a hub, referenced by many features). Both are advisory — the agent can ignore them, and neither fires unless a KB is already being loaded.
 
-**KB staleness** — `memories-{username}.md` entries are prepend-only and never expire. Over time, old entries about bugs that were fixed or decisions that were reversed accumulate. Retirement is manual: `[supersedes:XXXX]` and `[resolved:XXXX]` do drop an entry from the merged view, but only once someone knows its id and writes the tag — nothing *detects* that an entry has gone stale. The one automated exception is path-level: `key_files` references that no longer exist on disk are flagged on load. `/recall:compact` and `/recall:tidy` are the human-triggered cleanup path.
+**KB staleness** — `memories-{username}.md` entries are prepend-only and never expire. Over time, old entries about bugs that were fixed or decisions that were reversed accumulate. Retirement is manual: `[supersedes:XXXX]` and `[resolved:XXXX]` do drop an entry from the merged view, but only once someone knows its id and writes the tag — nothing _detects_ that an entry has gone stale. The one automated exception is path-level: `key_files` references that no longer exist on disk are flagged on load. `/recall:compact` and `/recall:tidy` are the human-triggered cleanup path.
 
 **Single-project assumption** — the hook and most tooling implicitly assume one active project. Multi-project setups work technically but the UX (specifying `project=` on every call, hook injecting all projects' indexes) becomes awkward.
 
@@ -347,9 +415,10 @@ Reload Claude Code after setup.
 
 ## Roadmap
 
-_Audited against the source on 2026-09-19. Checkboxes describe what ships today, not what was planned — if a claim here disagrees with the code, the code wins._
+_Audited against the source on 2026-10-06. Checkboxes describe what ships today, not what was planned — if a claim here disagrees with the code, the code wins._
 
 ### 🚀 DX & Slash Commands (Short-term)
+
 - [x] **CLI Setup:** `recall setup` automates the installation steps — MCP server registration, project config, issue-tracker preference, hook install, slash-command sync.
 - [x] **Cross-project resolution:** Auto-detect and resolve ambiguous feature slugs, disambiguating by project when a slug exists in more than one, with a fuzzy (`difflib`, ≥0.8) fallback when an exact match isn't found.
 - [x] **`/recall:init` auto-slugify:** Derives the slug from the branch segment, pre-fills the ticket ID from a key-shaped pattern in the branch name, and defaults the username from `git config user.name`. Every command takes an optional slug and auto-detects from the branch otherwise.
@@ -357,20 +426,23 @@ _Audited against the source on 2026-09-19. Checkboxes describe what ships today,
 - [ ] **Multi-slug context loading:** `load_feature_context(slugs=["payment", "fraud"])` for cross-feature tasks. Today `slug` is a single string.
 
 ### 🧠 Context Engine & Auto-Discovery
+
 - [x] **Smart linkages:** `<related_tickets>` section hints related context on load.
 - [x] **Cross-feature discovery by `key_files`:** Every KB's `<key_files>` paths are mined into a live path→slug index, so loading one feature surfaces "Possibly related (shared key_files, unconfirmed)" for the others.
 - [ ] **File-path mapping (hook):** Auto-detect the KB from the edited file path (`src/.../cache.py`) instead of branch name alone. The `key_files` index above runs inside `load_feature_context` — `prompt_submit.py` still detects on branch name only, so nothing proposes a KB from the file you just opened.
-- [x] **Summary-injected hooks:** The feature index injected on the first prompt of a session carries each feature's one-line summary, so Claude can weigh which KB matters without a discovery call.
+- [x] **Summary-injected hooks:** The feature index injected on the first prompt of a session carries each feature's one-line summary, so the agent can weigh which KB matters without a discovery call.
 - [ ] **Semantic Search:** Combine text search with local embeddings for large KBs.
 
 ### 🧹 Memory Lifecycle & Quality Control
+
 - [x] **Session nudges:** Two turn-counter reminders via `UserPromptSubmit` — `save_memory` every 8 turns, `report_miss` every 16. A `Stop` hook for session-end save was rejected for token cost; an earlier `PreCompact` save reminder was built and later dropped in favor of the turn counter.
 - [x] **`/recall:compact`:** Compress older journal entries to prevent unbounded context growth — translate non-English entries, condense verbose ones, and hide entries already captured in a README section. Surfaces itself through a size hint on load and after every write.
-- [ ] **Batch Curation Agent:** Weekly scheduled workflow to audit KBs, promote repeated patterns to README, and surface stale/contradicted entries.
+- [ ] **Batch Curation Agent:** Weekly scheduled workflow to audit KBs, promote repeated patterns to README, and surface stale/contradicted entries. The `.github/agents/kb-audit` workspace agent (see above) covers the audit half on demand, but it is manual and VS Code-only — nothing runs it on a schedule.
 - [x] **KB health signals:** The hook reports a branch-matched KB's own counts (`N decisions · N warnings · N past mistakes`) on the prompt that matches it, and every `load_feature_context` call flags `key_files` paths that no longer exist on disk; oversized memories or README sections trigger a `/recall:compact` or `/recall:tidy` hint after a load or a write.
-- [ ] **Health ratio:** `report_miss` vs `save_memory` as a *proportion*, so an unhealthy KB is visible without reading the numbers. Counts are surfaced today; the judgment isn't.
+- [ ] **Health ratio:** `report_miss` vs `save_memory` as a _proportion_, so an unhealthy KB is visible without reading the numbers. Counts are surfaced today; the judgment isn't.
 
 ### 👥 Team Collaboration & Ecosystem
+
 - [ ] **Auto Git Remote Sync:** Background `git pull/push` on load/save — keeping team READMEs synced while keeping personal `memories-{user}.md` conflict-free.
 - [ ] **Provenance tracking:** Add `source` field (PR, Jira ticket, manual) to memories and misses.
-- [ ] **GitHub Copilot support:** Extend hook compatibility to VS Code Copilot Agent hooks.
+- [x] **GitHub Copilot support:** Agent Skills (all 8 skills), `sessionStart` auto-load and `postToolUse` per-turn reminders, with `.mcp.json` and `.github/hooks/recall.json` generated by `recall setup --platform copilot`. Three Claude-only gaps remain by design and are documented in [GitHub Copilot](#github-copilot): the idle-gap guard, mid-session branch reload, and prompt-time injection.

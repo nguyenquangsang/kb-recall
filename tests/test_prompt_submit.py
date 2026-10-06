@@ -7,8 +7,8 @@ root so `from kb_recall.hooks.hook_helpers import ...` resolves correctly.
 
 import json
 import os
-import sys
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,7 +19,7 @@ HOOK = REPO_ROOT / "kb_recall" / "hooks" / "prompt_submit.py"
 
 
 def _git(args, cwd):
-    subprocess.run(["git"] + args, cwd=cwd, capture_output=True, check=True)
+    subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=True)
 
 
 def _make_env(tmp_path, branch=None):
@@ -122,6 +122,7 @@ def run_hook(env, session_id, cwd=None, transcript_path=None, prompt=""):
             "PYTHONPATH": str(REPO_ROOT),
         },
         cwd=str(cwd or env["project"]),
+        check=False,  # the tests assert on stdout, not on a raised status
     )
     return result.stdout
 
@@ -476,6 +477,7 @@ class TestSessionIdFile:
             text=True,
             env={"HOME": str(env["home"]), "PYTHONPATH": str(REPO_ROOT)},
             cwd=str(env["project"]),
+            check=False,  # the assertion is on the file, not on the exit status
         )
         session_file = env["kb_root"] / "current-session"
         assert not session_file.exists()
