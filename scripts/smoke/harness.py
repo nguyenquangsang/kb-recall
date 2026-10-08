@@ -88,7 +88,8 @@ def isolated_home(repo: Path, keep: bool = False):
         # Pin the username so _resolve_username never shells out to `git config`
         # and never inherits the developer's own memories file.
         (store / "config.json").write_text(
-            json.dumps({"projects": [str(repo)], "username": "smoke"}, indent=2) + "\n"
+            json.dumps({"projects": [str(repo)], "username": "smoke"}, indent=2) + "\n",
+            encoding="utf-8",
         )
         yield home
     finally:
@@ -112,7 +113,8 @@ def write_mcp_config(home: Path, repo: Path) -> Path:
             {"mcpServers": {"recall": {"type": "stdio", "command": str(server)}}},
             indent=2,
         )
-        + "\n"
+        + "\n",
+        encoding="utf-8",
     )
     return config
 
@@ -134,7 +136,11 @@ def run_claude(
     recall-mcp call.
     """
     env = dict(os.environ)
+    # Both, not just HOME: Windows' ntpath.expanduser() reads USERPROFILE and
+    # never consults HOME, so setting HOME alone would still resolve the KB paths
+    # to the real profile. Mirrors tests/conftest.py::fake_home.
     env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
     env["ANTHROPIC_MODEL"] = model
 
     cmd = [
@@ -159,7 +165,7 @@ def run_claude(
         cwd=repo,
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=timeout,
         check=False,
     )
@@ -183,7 +189,7 @@ def load_usage_file(path) -> list:
     path = Path(path)
     if not path.exists():
         return []
-    return _parse_jsonl(path.read_text())
+    return _parse_jsonl(path.read_text(encoding="utf-8"))
 
 
 def usage_offset(path) -> int:
@@ -202,7 +208,7 @@ def records_since(path, offset: int) -> list:
     path = Path(path)
     if not path.exists():
         return []
-    with path.open("r") as handle:
+    with path.open("r", encoding="utf-8") as handle:
         handle.seek(offset)
         return _parse_jsonl(handle.read())
 
@@ -225,7 +231,7 @@ def find_copilot() -> Path:
         proc = subprocess.run(
             [npm, "config", "get", "prefix"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=False,
         )
         if proc.returncode == 0 and proc.stdout.strip():
@@ -280,7 +286,7 @@ def run_copilot(
         cmd,
         cwd=repo,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=timeout,
         check=False,
     )

@@ -9,6 +9,7 @@ import pytest
 
 from kb_recall import cli
 from kb_recall.adapters.copilot.hook import POST_TOOL_USE_MATCHER
+from tests.conftest import fake_home
 
 
 @pytest.fixture
@@ -30,18 +31,20 @@ class TestCmdBlockIdle:
 
     def test_sets_true(self, kb_root):
         assert cli.cmd_block_idle(["true"]) == 0
-        cfg = json.loads((kb_root / "config.json").read_text())
+        cfg = json.loads((kb_root / "config.json").read_text(encoding="utf-8"))
         assert cfg["block_idle"] is True
 
     def test_sets_false(self, kb_root):
         assert cli.cmd_block_idle(["false"]) == 0
-        cfg = json.loads((kb_root / "config.json").read_text())
+        cfg = json.loads((kb_root / "config.json").read_text(encoding="utf-8"))
         assert cfg["block_idle"] is False
 
     def test_preserves_existing_config(self, kb_root):
-        (kb_root / "config.json").write_text(json.dumps({"projects": ["/a/b"]}))
+        (kb_root / "config.json").write_text(
+            json.dumps({"projects": ["/a/b"]}), encoding="utf-8"
+        )
         cli.cmd_block_idle(["false"])
-        cfg = json.loads((kb_root / "config.json").read_text())
+        cfg = json.loads((kb_root / "config.json").read_text(encoding="utf-8"))
         assert cfg["projects"] == ["/a/b"]
         assert cfg["block_idle"] is False
 
@@ -69,7 +72,15 @@ class TestRecallCommand:
         real.touch()
         link = tmp_path / "bin" / "recall"
         link.parent.mkdir()
-        link.symlink_to(real)
+        try:
+            link.symlink_to(real)
+        except OSError as exc:
+            # Skipped rather than marked win32-only: symlink creation needs
+            # SeCreateSymbolicLinkPrivilege on Windows, which some runners have
+            # and some do not, so the OS refuses or permits it independently of
+            # the platform name. Skipping on the actual refusal keeps the test
+            # running wherever it can.
+            pytest.skip(f"symlink creation not permitted here: {exc}")
         monkeypatch.setattr(cli.shutil, "which", lambda _: str(link))
         assert cli._recall_command() == f"{link} prompt"
 
@@ -123,7 +134,8 @@ class TestClaudeCli:
     @pytest.fixture(autouse=True)
     def no_path_claude(self, monkeypatch, tmp_path):
         monkeypatch.setattr(cli.shutil, "which", lambda _: None)
-        monkeypatch.setenv("HOME", str(tmp_path))
+        for key, value in fake_home(tmp_path).items():
+            monkeypatch.setenv(key, value)
         return tmp_path
 
     def test_prefers_path_install(self, monkeypatch):
@@ -151,6 +163,12 @@ class TestClaudeCli:
         _make_extension_binary(no_path_claude, "2.1.272")
         assert cli._claude_cli() == str(local)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no executable bit: os.access(X_OK) is True for any "
+        "existing file and chmod(0o644) only toggles the read-only flag, so a "
+        "candidate cannot be made non-executable the way this test needs.",
+    )
     def test_ignores_non_executable_candidate(self, no_path_claude):
         exe = _make_extension_binary(no_path_claude, "2.1.272")
         exe.chmod(0o644)
@@ -164,7 +182,9 @@ class TestCmdSetup:
     def project(self, tmp_path, monkeypatch):
         script_dir = tmp_path / "script"
         (script_dir / "templates").mkdir(parents=True)
-        (script_dir / "templates" / "claude-md-snippet.md").write_text("recall-mcp\n")
+        (script_dir / "templates" / "claude-md-snippet.md").write_text(
+            "recall-mcp\n", encoding="utf-8"
+        )
 
         project_dir = tmp_path / "project"
         project_dir.mkdir()
@@ -183,7 +203,7 @@ class TestCmdSetup:
         monkeypatch.setattr(cli, "_claude_cli", lambda: None)
         assert cli.cmd_setup([]) == 0
         assert "Could not find the `claude` CLI" in capsys.readouterr().out
-        cfg = json.loads((cli.KB_ROOT / "config.json").read_text())
+        cfg = json.loads((cli.KB_ROOT / "config.json").read_text(encoding="utf-8"))
         assert str(project) in cfg["projects"]
         assert (project / "CLAUDE.local.md").exists()
 
@@ -199,7 +219,7 @@ class TestCmdSetup:
         out = capsys.readouterr().out
         assert "Could not auto-register" in out
         assert "/nope/claude mcp add --scope user recall" in out
-        cfg = json.loads((cli.KB_ROOT / "config.json").read_text())
+        cfg = json.loads((cli.KB_ROOT / "config.json").read_text(encoding="utf-8"))
         assert str(project) in cfg["projects"]
 
     def test_reregisters_instead_of_leaving_a_stale_entry(self, project, monkeypatch):
@@ -298,14 +318,18 @@ class TestCmdSetupCopilot:
     def project(self, tmp_path, monkeypatch):
         script_dir = tmp_path / "script"
         (script_dir / "templates").mkdir(parents=True)
-        (script_dir / "templates" / "claude-md-snippet.md").write_text("recall-mcp\n")
+        (script_dir / "templates" / "claude-md-snippet.md").write_text(
+            "recall-mcp\n", encoding="utf-8"
+        )
         (script_dir / "templates" / "copilot-instructions.md").write_text(
-            "recall-mcp for copilot\n"
+            "recall-mcp for copilot\n",
+            encoding="utf-8",
         )
         (script_dir / "skills" / "recall-load").mkdir(parents=True)
         (script_dir / "skills" / "recall-load" / "SKILL.md").write_text(
             "---\nname: recall-load\ndescription: load a KB\n---\n\n## When to use\n"
-            "Never wrong.\n"
+            "Never wrong.\n",
+            encoding="utf-8",
         )
 
         project_dir = tmp_path / "project"
@@ -320,15 +344,22 @@ class TestCmdSetupCopilot:
         monkeypatch.setattr(cli, "COPILOT_SKILLS_DIR", tmp_path / "copilot" / "skills")
         monkeypatch.setattr(cli, "cmd_sync_commands", lambda *_: 0)
         monkeypatch.setattr("builtins.input", lambda *_: "other")
-        monkeypatch.setattr(cli.shutil, "which", lambda name: f"/fake/bin/{name}")
+        # Under tmp_path rather than a literal "/fake/bin": _server_command()
+        # bakes in str(Path(exe).absolute()), and on Windows a POSIX-style root
+        # resolves against the current drive ("/fake/bin/x" -> "C:\fake\bin\x"),
+        # so a hardcoded POSIX literal asserts something the code never returns
+        # there. tmp_path is absolute on every platform, so it round-trips.
+        fake_bin = tmp_path / "fake-bin"
+        monkeypatch.setattr(cli.shutil, "which", lambda name: str(fake_bin / name))
         return project_dir
 
-    def test_writes_the_mcp_config(self, project):
+    def test_writes_the_mcp_config(self, project, tmp_path):
         assert cli.cmd_setup(["--platform", "copilot"]) == 0
 
-        server = json.loads((project / ".mcp.json").read_text())["mcpServers"]["recall"]
+        mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
+        server = mcp_config["mcpServers"]["recall"]
         assert server["type"] == "stdio"
-        assert server["command"] == "/fake/bin/recall-server"
+        assert server["command"] == str(tmp_path / "fake-bin" / "recall-server")
 
     def test_writes_both_hook_events_with_the_event_on_argv(self, project):
         """Both events in one file: the adapter dispatches on argv[1], and the
@@ -336,9 +367,9 @@ class TestCmdSetupCopilot:
         has to be baked into the command string."""
         cli.cmd_setup(["--platform", "copilot"])
 
-        hooks = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
-            "hooks"
-        ]
+        hooks = json.loads(
+            (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
+        )["hooks"]
         assert set(hooks) == {"sessionStart", "postToolUse"}
         assert hooks["sessionStart"][0]["command"].endswith(" sessionStart")
         assert hooks["postToolUse"][0]["command"].endswith(" postToolUse")
@@ -349,9 +380,9 @@ class TestCmdSetupCopilot:
         SILENTLY, so a drifted copy would fail with no signal at all."""
         cli.cmd_setup(["--platform", "copilot"])
 
-        entry = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
-            "hooks"
-        ]["postToolUse"][0]
+        entry = json.loads(
+            (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
+        )["hooks"]["postToolUse"][0]
         assert entry["matcher"] == POST_TOOL_USE_MATCHER
         re.compile(f"^(?:{entry['matcher']})$")
 
@@ -372,16 +403,15 @@ class TestCmdSetupCopilot:
 
     def test_writes_the_instructions_file(self, project):
         cli.cmd_setup(["--platform", "copilot"])
-        assert (
-            "recall-mcp for copilot"
-            in (project / ".github" / "copilot-instructions.md").read_text()
-        )
+        assert "recall-mcp for copilot" in (
+            project / ".github" / "copilot-instructions.md"
+        ).read_text(encoding="utf-8")
 
     def test_writes_the_skills_to_user_scope(self, project):
         cli.cmd_setup(["--platform", "copilot"])
         skill = cli.COPILOT_SKILLS_DIR / "recall-load" / "SKILL.md"
         assert skill.is_symlink() or skill.exists()
-        assert "name: recall-load" in skill.read_text()
+        assert "name: recall-load" in skill.read_text(encoding="utf-8")
 
     def test_skills_are_user_scoped_not_project_scoped(self, project):
         """Skills serve every project, so they install once under ~/.copilot/
@@ -397,7 +427,7 @@ class TestCmdSetupCopilot:
         from the repo, so it stays committable."""
         cli.cmd_setup(["--platform", "copilot"])
 
-        ignored = (project / ".gitignore").read_text().splitlines()
+        ignored = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert ".mcp.json" in ignored
         assert ".github/hooks/recall.json" in ignored
         assert not any("copilot-instructions" in entry for entry in ignored)
@@ -406,7 +436,7 @@ class TestCmdSetupCopilot:
         cli.cmd_setup(["--platform", "copilot"])
         cli.cmd_setup(["--platform", "copilot"])
 
-        ignored = (project / ".gitignore").read_text().splitlines()
+        ignored = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert ignored.count(".mcp.json") == 1
 
     def test_writes_instructions_even_when_claude_md_already_carries_recall(
@@ -416,15 +446,14 @@ class TestCmdSetupCopilot:
         injection, list_features needed), so Copilot still gets its own file even
         when CLAUDE.local.md already has recall-mcp — `--platform all` must not
         leave Copilot holding only the Claude-flavoured guidance."""
-        (project / "CLAUDE.local.md").write_text("recall-mcp\n")
+        (project / "CLAUDE.local.md").write_text("recall-mcp\n", encoding="utf-8")
 
         cli.cmd_setup(["--platform", "copilot"])
 
         assert (project / ".github" / "copilot-instructions.md").exists()
-        assert (
-            "recall-mcp for copilot"
-            in (project / ".github" / "copilot-instructions.md").read_text()
-        )
+        assert "recall-mcp for copilot" in (
+            project / ".github" / "copilot-instructions.md"
+        ).read_text(encoding="utf-8")
 
     def test_mcp_config_preserves_other_servers(self, project):
         """`.mcp.json` is the shared workspace-root MCP config — a recall setup
@@ -436,12 +465,15 @@ class TestCmdSetupCopilot:
                         "other-team-server": {"type": "stdio", "command": "/bin/other"}
                     }
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         cli.cmd_setup(["--platform", "copilot"])
 
-        servers = json.loads((project / ".mcp.json").read_text())["mcpServers"]
+        servers = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))[
+            "mcpServers"
+        ]
         assert servers["other-team-server"] == {
             "type": "stdio",
             "command": "/bin/other",
@@ -453,12 +485,15 @@ class TestCmdSetupCopilot:
         team's own content — setup must append to it, never replace it."""
         (project / ".github").mkdir(parents=True, exist_ok=True)
         (project / ".github" / "copilot-instructions.md").write_text(
-            "# Team rules\nAlways run make lint.\n"
+            "# Team rules\nAlways run make lint.\n",
+            encoding="utf-8",
         )
 
         cli.cmd_setup(["--platform", "copilot"])
 
-        text = (project / ".github" / "copilot-instructions.md").read_text()
+        text = (project / ".github" / "copilot-instructions.md").read_text(
+            encoding="utf-8"
+        )
         assert "Always run make lint." in text
         assert "recall-mcp for copilot" in text
 
@@ -474,25 +509,26 @@ class TestCmdSetupCopilot:
                         "preToolUse": [{"type": "command", "command": "/bin/other"}]
                     },
                 }
-            )
+            ),
+            encoding="utf-8",
         )
 
         cli.cmd_setup(["--platform", "copilot"])
 
-        hooks = json.loads((project / ".github" / "hooks" / "recall.json").read_text())[
-            "hooks"
-        ]
+        hooks = json.loads(
+            (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
+        )["hooks"]
         assert hooks["preToolUse"] == [{"type": "command", "command": "/bin/other"}]
         assert "sessionStart" in hooks
 
     def test_malformed_mcp_json_is_left_untouched(self, project, capsys):
         """A .mcp.json we can't parse must not be clobbered — refuse rather than
         destroy whatever is in it."""
-        (project / ".mcp.json").write_text("{ not valid json")
+        (project / ".mcp.json").write_text("{ not valid json", encoding="utf-8")
 
         cli.cmd_setup(["--platform", "copilot"])
 
-        assert (project / ".mcp.json").read_text() == "{ not valid json"
+        assert (project / ".mcp.json").read_text(encoding="utf-8") == "{ not valid json"
         assert "isn't valid JSON" in capsys.readouterr().out
 
     def test_claude_platform_writes_no_copilot_files(self, project, monkeypatch):

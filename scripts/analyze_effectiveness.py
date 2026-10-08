@@ -52,7 +52,7 @@ def load_usage(path):
     records = []
     if not path.exists():
         return records
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -175,7 +175,7 @@ def scan_transcript(path):
         finalize("miss")
 
     try:
-        with path.open() as f:
+        with path.open(encoding="utf-8") as f:
             lines = f.readlines()
     except OSError:
         return events

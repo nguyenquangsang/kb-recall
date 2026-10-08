@@ -14,6 +14,7 @@ from pathlib import Path
 # an invalid regex makes the harness skip the whole hook entry SILENTLY, so the two
 # copies would have to be kept in sync by hand with no failure signal if they drift.
 from kb_recall.adapters.copilot.hook import POST_TOOL_USE_MATCHER
+from kb_recall.stdio import force_utf8_stdio
 
 KB_ROOT = Path.home() / ".recall-mcp"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
@@ -24,12 +25,14 @@ def _read_config() -> dict:
     cfg = KB_ROOT / "config.json"
     if not cfg.exists():
         return {}
-    return json.loads(cfg.read_text())
+    return json.loads(cfg.read_text(encoding="utf-8"))
 
 
 def _write_config(data: dict) -> None:
     KB_ROOT.mkdir(parents=True, exist_ok=True)
-    (KB_ROOT / "config.json").write_text(json.dumps(data, indent=2) + "\n")
+    (KB_ROOT / "config.json").write_text(
+        json.dumps(data, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 def _recall_command() -> str:
@@ -207,12 +210,12 @@ def _parse_platform(args: list[str]) -> str | None:
 def _ensure_gitignored(project_dir: Path, entries: list[str]) -> None:
     """Append any of `entries` missing from .gitignore, one per line."""
     gitignore = project_dir / ".gitignore"
-    text = gitignore.read_text() if gitignore.exists() else ""
+    text = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
     missing = [entry for entry in entries if entry not in text.splitlines()]
     if not missing:
         print(f"  — Already gitignored: {', '.join(entries)}")
         return
-    with gitignore.open("a") as f:
+    with gitignore.open("a", encoding="utf-8") as f:
         if text and not text.endswith("\n"):
             f.write("\n")
         for entry in missing:
@@ -294,7 +297,7 @@ def _read_json_dict(path: Path) -> dict | None:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
@@ -311,18 +314,22 @@ def _write_copilot_instructions(project_dir: Path) -> None:
     recall-mcp marker is the team's own instructions — append to it, never overwrite.
     """
     target = project_dir / ".github" / "copilot-instructions.md"
-    if target.exists() and "recall-mcp" in target.read_text():
+    if target.exists() and "recall-mcp" in target.read_text(encoding="utf-8"):
         print("  — .github/copilot-instructions.md already has the recall-mcp section")
         return
 
-    snippet = (SCRIPT_DIR / "templates" / "copilot-instructions.md").read_text()
+    snippet = (SCRIPT_DIR / "templates" / "copilot-instructions.md").read_text(
+        encoding="utf-8"
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists():
-        existing = target.read_text().rstrip()
-        target.write_text(f"{existing}\n\n---\n\n{snippet}" if existing else snippet)
+        existing = target.read_text(encoding="utf-8").rstrip()
+        target.write_text(
+            f"{existing}\n\n---\n\n{snippet}" if existing else snippet, encoding="utf-8"
+        )
         print(f"  ✓ Appended to {target.relative_to(project_dir)}")
     else:
-        target.write_text(snippet)
+        target.write_text(snippet, encoding="utf-8")
         print(f"  ✓ Created {target.relative_to(project_dir)}")
 
 
@@ -378,7 +385,7 @@ def _setup_copilot(project_dir: Path) -> None:
             servers = {}
         servers["recall"] = _copilot_mcp_config()["mcpServers"]["recall"]
         existing_mcp["mcpServers"] = servers
-        mcp_file.write_text(json.dumps(existing_mcp, indent=2) + "\n")
+        mcp_file.write_text(json.dumps(existing_mcp, indent=2) + "\n", encoding="utf-8")
         suffix = " (merged with existing servers)" if len(servers) > 1 else ""
         print(f"  ✓ {mcp_file.name} → recall (stdio){suffix}")
     print(
@@ -403,7 +410,9 @@ def _setup_copilot(project_dir: Path) -> None:
             merged_hooks[event] = entries
         existing_hooks["hooks"] = merged_hooks
         existing_hooks.setdefault("version", 1)
-        hooks_file.write_text(json.dumps(existing_hooks, indent=2) + "\n")
+        hooks_file.write_text(
+            json.dumps(existing_hooks, indent=2) + "\n", encoding="utf-8"
+        )
         print(
             f"  ✓ {hooks_file.relative_to(project_dir)} "
             "(sessionStart auto-load + postToolUse reminders)"
@@ -515,21 +524,29 @@ def cmd_setup(args: list[str]) -> int:
         local_md = project_dir / "CLAUDE.local.md"
         legacy_md = project_dir / "CLAUDE.md"
         snippet = (
-            (SCRIPT_DIR / "templates" / "claude-md-snippet.md").read_text().strip()
+            (SCRIPT_DIR / "templates" / "claude-md-snippet.md")
+            .read_text(encoding="utf-8")
+            .strip()
         )
         already_has_section = (
-            "recall-mcp" in local_md.read_text() if local_md.exists() else False
-        ) or ("recall-mcp" in legacy_md.read_text() if legacy_md.exists() else False)
+            "recall-mcp" in local_md.read_text(encoding="utf-8")
+            if local_md.exists()
+            else False
+        ) or (
+            "recall-mcp" in legacy_md.read_text(encoding="utf-8")
+            if legacy_md.exists()
+            else False
+        )
         if already_has_section:
             print(
                 "  — CLAUDE.local.md (or legacy CLAUDE.md) already has recall-mcp section"
             )
         elif local_md.exists():
-            with local_md.open("a") as f:
+            with local_md.open("a", encoding="utf-8") as f:
                 f.write(f"\n\n{snippet}\n")
             print(f"  ✓ Appended recall-mcp section to {local_md.name}")
         else:
-            local_md.write_text(f"{snippet}\n")
+            local_md.write_text(f"{snippet}\n", encoding="utf-8")
             print(f"  ✓ Created {local_md.name} with recall-mcp section")
 
         _ensure_gitignored(project_dir, ["CLAUDE.local.md"])
@@ -568,7 +585,7 @@ def cmd_setup(args: list[str]) -> int:
 
         settings: dict = {}
         if CLAUDE_SETTINGS.exists():
-            settings = json.loads(CLAUDE_SETTINGS.read_text())
+            settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
 
         hooks = settings.setdefault("hooks", {})
 
@@ -608,7 +625,9 @@ def cmd_setup(args: list[str]) -> int:
             print("  ✓ UserPromptSubmit hook installed")
 
         CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-        CLAUDE_SETTINGS.write_text(json.dumps(settings, indent=2) + "\n")
+        CLAUDE_SETTINGS.write_text(
+            json.dumps(settings, indent=2) + "\n", encoding="utf-8"
+        )
 
         # Step 5 — Sync slash commands to ~/.claude/commands/recall/
         print("\n[5/5] Syncing slash commands...")
@@ -653,6 +672,9 @@ def _print_usage() -> None:
 
 
 def main() -> None:
+    # First thing: `setup` prints `✓`/`—`, and a Windows console redirect (or the
+    # pipe a wrapper reads) would otherwise hand those the locale's cp1252.
+    force_utf8_stdio()
     args = sys.argv[1:]
     # `--help` is honoured in any position, not only as args[0]. Checking only the
     # first argument meant `recall setup --help` reached cmd_setup, which ignored

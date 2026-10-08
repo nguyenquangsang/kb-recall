@@ -17,6 +17,7 @@ import re
 import secrets
 import subprocess
 import time
+from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 from string import Template
@@ -203,7 +204,7 @@ KB_INDEX_TITLE_BUDGET_CHARS = 2_000
 def _projects() -> list[Path]:
     if not CONFIG_PATH.exists():
         return []
-    data = json.loads(CONFIG_PATH.read_text())
+    data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
     return [Path(p).expanduser().resolve() for p in data.get("projects", [])]
 
 
@@ -246,7 +247,7 @@ def _active_project(project: str = "") -> list[Path]:
 def _has_recall_setup(project_path: Path) -> bool:
     for name in ("CLAUDE.local.md", "CLAUDE.md"):
         f = project_path / name
-        if f.exists() and "recall-mcp" in f.read_text():
+        if f.exists() and "recall-mcp" in f.read_text(encoding="utf-8"):
             return True
     return False
 
@@ -331,7 +332,7 @@ def _today_iso() -> str:
 
 def _current_session_id() -> str:
     try:
-        return (KB_ROOT / "current-session").read_text().strip()
+        return (KB_ROOT / "current-session").read_text(encoding="utf-8").strip()
     except Exception:  # noqa: BLE001 — no session file simply means no id
         return ""
 
@@ -344,12 +345,12 @@ def _log(tool: str, **kwargs) -> None:
         parts = " ".join(
             f"{k}={v}" for k, v in fields.items() if v is not None and v != ""
         )
-        with LOG_FILE.open("a") as f:
+        with LOG_FILE.open("a", encoding="utf-8") as f:
             f.write(f"{ts}  {tool:<22}  {parts}\n")
         entry: dict = {"ts": ts, "tool": tool, **fields}
         if session_id:
             entry["session_id"] = session_id
-        with LOG_JSONL.open("a") as f:
+        with LOG_JSONL.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
     except Exception:  # noqa: BLE001, S110 — the logger cannot log its own failure
         pass
@@ -391,12 +392,12 @@ def _ensure_git_repo(project_root: Path) -> None:
 def _read_config() -> dict:
     if not CONFIG_PATH.exists():
         return {}
-    return json.loads(CONFIG_PATH.read_text())
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
 def _write_config(data: dict) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(data, indent=2) + "\n")
+    CONFIG_PATH.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -412,7 +413,7 @@ def _atomic_write(path: Path, text: str) -> None:
     needs a lock for true lost-update safety — level 2, deliberately deferred.
     """
     tmp = path.with_name(f"{path.name}.tmp-{time.monotonic_ns()}")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
 
 
@@ -568,7 +569,7 @@ def _memory_tag_for_id(d: Path, entry_id: str) -> str:
     """
     needle = f"[id:{entry_id.lower()}]"
     for fpath in _memories_files(d):
-        for line in fpath.read_text().splitlines():
+        for line in fpath.read_text(encoding="utf-8").splitlines():
             if needle in line:
                 return _entry_tag(line)
     return ""
@@ -587,7 +588,7 @@ def _id_is_retired(d: Path, target_id: str, exclude_id: str = "") -> bool:
     resolved = f"[resolved:{target_id.lower()}]"
     exclude = f"[id:{exclude_id.lower()}]" if exclude_id else ""
     for fpath in _memories_files(d):
-        for line in fpath.read_text().splitlines():
+        for line in fpath.read_text(encoding="utf-8").splitlines():
             if not line.strip().startswith(_ENTRY_OPEN):
                 continue
             if exclude and exclude in line:
@@ -699,7 +700,7 @@ def _collect_memory_entries(
 
     for fpath in files:
         buf: list[str] = []
-        for line in fpath.read_text().splitlines():
+        for line in fpath.read_text(encoding="utf-8").splitlines():
             if line.strip().startswith(_ENTRY_OPEN):
                 malformed += _flush_memory_entry(buf, entries)
                 buf = [line.strip()]
@@ -820,7 +821,7 @@ def _render_budgeted(
     footer: str,
     sections_filter: list[str] | None,
     max_chars: int | None,
-) -> str:
+) -> tuple[str, int, int]:
     """Assemble the context under a sections allow-list and/or a char budget.
 
     Units are admitted in strict `SECTION_PRIORITY` order and the first one that
@@ -842,6 +843,11 @@ def _render_budgeted(
     They are reserved (always shown) rather than budget-limited — an explicit
     request must survive even a budget below the fixed frame, otherwise the
     index's "call expand_ids to fetch a body" instruction can never be honoured.
+
+    Returns (result, rendered_readme_chars, rendered_memories_chars): the
+    assembled string plus the char counts of the README/memories content it
+    actually kept, so the caller can restate the header's token estimate from
+    the filtered payload rather than the unfiltered source.
     """
     preamble, section_list = _split_readme_sections(readme_stripped)
 
@@ -931,7 +937,16 @@ def _render_budgeted(
     if index_part:
         parts.append(index_part)
     parts.append(footer)
-    return "\n\n".join(parts)
+    # The caller rebuilds the header's token estimate from these so it reflects
+    # what actually rendered — the unfiltered source it was built from would
+    # otherwise over-report under a sections=/max_chars= filter.
+    rendered_readme = len("\n\n".join(readme_content)) if readme_content else 0
+    rendered_memories = (
+        len("\n\n".join(memories_blocks)) + (len(index_part) if index_part else 0)
+        if memories_blocks or index_part
+        else 0
+    )
+    return "\n\n".join(parts), rendered_readme, rendered_memories
 
 
 _KEY_FILES_LINE_RE = re.compile(
@@ -995,7 +1010,7 @@ def _key_files_index(
             if not feature_dir.is_dir() or not readme.exists():
                 continue
             slug = feature_dir.name
-            text = _strip_html_comments(readme.read_text())
+            text = _strip_html_comments(readme.read_text(encoding="utf-8"))
             m = re.search(r"<key_files>(.*?)</key_files>", text, re.DOTALL)
             if not m:
                 continue
@@ -1192,7 +1207,7 @@ def _health_hint_suffix(d: Path) -> str:
     load fails outright. Checking on every write closes that gap.
     """
     readme = d / "README.md"
-    readme_text = readme.read_text() if readme.exists() else ""
+    readme_text = readme.read_text(encoding="utf-8") if readme.exists() else ""
     entries, _ = _collect_memory_entries(_memories_files(d), readme_text)
     combined = "\n\n".join(block for _, block in entries) if entries else ""
     hints = _kb_health_hints(readme_text, combined, _count_unpromoted_gating(entries))
@@ -1258,7 +1273,7 @@ def _full_body_total_chars(d: Path, new_entry: str) -> int:
     uses, so the figure is the real weight, not a stripped estimate."""
     readme = d / "README.md"
     readme_text = (
-        _strip_readme_for_context(readme.read_text(), keep_markers=True)
+        _strip_readme_for_context(readme.read_text(encoding="utf-8"), keep_markers=True)
         if readme.exists()
         else ""
     )
@@ -1281,7 +1296,7 @@ def _post_save_total_chars(d: Path, new_entry: str) -> int:
     prepended as the newest, matching save_memory's write order.
     """
     readme = d / "README.md"
-    readme_text = readme.read_text() if readme.exists() else ""
+    readme_text = readme.read_text(encoding="utf-8") if readme.exists() else ""
     entries, _ = _collect_memory_entries(_memories_files(d), readme_text)
     retired = _retire_ids_from_entry(new_entry)
     live = [(dt, b) for dt, b in entries if _entry_id(b) not in retired]
@@ -1396,7 +1411,11 @@ def _readme_write_blocked(d: Path, new_readme_text: str) -> tuple[int, int] | No
     """
     readme = d / "README.md"
     old_len = (
-        len(_strip_readme_for_context(readme.read_text(), keep_markers=True))
+        len(
+            _strip_readme_for_context(
+                readme.read_text(encoding="utf-8"), keep_markers=True
+            )
+        )
         if readme.exists()
         else 0
     )
@@ -1470,7 +1489,9 @@ def list_features(project: str = "") -> str:
             index = _kb_root(proj) / "features.md"
             if not index.exists():
                 continue
-            sections.append(f"## {proj.name}\n\n{index.read_text().strip()}")
+            sections.append(
+                f"## {proj.name}\n\n{index.read_text(encoding='utf-8').strip()}"
+            )
 
         log_kwargs["count"] = sum(
             1
@@ -1518,13 +1539,11 @@ def search_features(query: str, project: str = "") -> str:
             subset-vs-all yourself — ask, offering real project names as
             choices.
 
-    OUTPUT: Results are lightweight snippets grouped by slug, ranked by relevance
-    (most distinct keywords matched first) — NOT full KB content. Each hit shows
-    "(N/M kw)"; N==M is the strongest signal. For any slug that looks relevant,
-    call load_feature_context(slug) before relying on the snippet alone. Capped
-    at MAX_SEARCH_RESULTS; if truncated, shown hits are already the best —
-    narrow the query, don't assume a better one was cut. Zero hits ≠ confirmed
-    absence — retry a broader keyword first.
+    OUTPUT: Memory hits (id:xxxx) show the full self-contained entry — act on
+    it directly, running its Verify: line to confirm. README hits ([section])
+    are pointers into a larger section — load it first:
+    load_feature_context(slug, sections=[...]). Zero hits ≠ absence — retry a
+    broader keyword. Truncation keeps the highest-ranked hits only.
 
     Examples:
         SEARCH "kubernetes istio envoy" -> 0 hits -> WHY: absent isn't proof
@@ -1629,7 +1648,7 @@ def search_features(query: str, project: str = "") -> str:
                 slug_hits: list[str] = []
                 slug_matched: set[str] = set()
 
-                readme_text = _strip_html_comments(readme.read_text())
+                readme_text = _strip_html_comments(readme.read_text(encoding="utf-8"))
                 for tag_m in re.finditer(r"<(\w+)>(.*?)</\1>", readme_text, re.DOTALL):
                     section = tag_m.group(1)
                     for line in tag_m.group(2).splitlines():
@@ -1642,13 +1661,10 @@ def search_features(query: str, project: str = "") -> str:
                             )
                             slug_matched |= kws
 
-                combined, _malformed = _merge_memories(
-                    _memories_files(feature_dir), readme.read_text()
+                memory_entries, _malformed = _collect_memory_entries(
+                    _memories_files(feature_dir), readme.read_text(encoding="utf-8")
                 )
-                for block in re.split(r"\n\s*\n", combined):
-                    block = block.strip()
-                    if not block:
-                        continue
+                for _date, block in memory_entries:
                     line_kws = [
                         (line.strip(), _matched_keywords(line))
                         for line in block.splitlines()
@@ -1656,19 +1672,23 @@ def search_features(query: str, project: str = "") -> str:
                     matching_entries = [(line, kws) for line, kws in line_kws if kws]
                     if not matching_entries:
                         continue
+                    entry_kws: set[str] = set()
                     for _, kws in matching_entries:
+                        entry_kws |= kws
                         slug_matched |= kws
                     entry_id = _entry_id(block)
                     label = f"id:{entry_id}" if entry_id else "memory"
-                    shown_entries = matching_entries[:2]
-                    shown_kws: set[str] = set()
-                    for _, kws in shown_entries:
-                        shown_kws |= kws
-                    snippets = (_snippet(line) for line, _ in shown_entries)
+                    # A memory entry is self-contained (What/Why/Apply/Verify live
+                    # in one block), so show it whole — unlike a README section
+                    # line, which is a pointer into a larger cross-referencing
+                    # section. Indent the body so it reads as one hit, not a
+                    # sibling list item.
+                    content = _entry_content(block).strip()
+                    content = "\n".join(
+                        "  " + ln if ln else ln for ln in content.splitlines()
+                    )
                     slug_hits.append(
-                        f"[{label}] "
-                        + " / ".join(snippets)
-                        + f" ({len(shown_kws)}/{total_keywords} kw)"
+                        f"[{label}] ({len(entry_kws)}/{total_keywords} kw)\n{content}"
                     )
 
                 if slug_hits:
@@ -1697,7 +1717,26 @@ def search_features(query: str, project: str = "") -> str:
             hits_by_key,
             key=lambda k: (-len(matched_keywords_by_key.get(k, set())), k[0], k[1]),
         )
-        flat_hits = [(key, hit) for key in ranked_keys for hit in hits_by_key[key]]
+        # Round-robin across ranked slugs so one high-matching slug cannot fill
+        # the whole MAX_SEARCH_RESULTS window and crowd out every other slug —
+        # the relevance sort still decides each slug's first (and per-round)
+        # hit, but every slug gets a turn before any slug adds a second.
+        # `None` is the exhausted sentinel — see `iterators[i] = None` below, which
+        # is why the element type is Optional rather than a bare Iterator.
+        iterators: list[Iterator[str] | None] = [
+            iter(hits_by_key[key]) for key in ranked_keys
+        ]
+        flat_hits: list[tuple[tuple[str, str], str]] = []
+        exhausted = 0
+        while exhausted < len(iterators):
+            for i, it in enumerate(iterators):
+                if it is None:
+                    continue
+                try:
+                    flat_hits.append((ranked_keys[i], next(it)))
+                except StopIteration:
+                    iterators[i] = None
+                    exhausted += 1
         total_hits = len(flat_hits)
         shown_hits = flat_hits[:MAX_SEARCH_RESULTS]
         truncated = total_hits > MAX_SEARCH_RESULTS
@@ -1736,8 +1775,12 @@ def search_features(query: str, project: str = "") -> str:
             )
         parts.append(
             "\n---\n"
-            "These are lightweight snippets, not full content — do not answer from "
-            "the snippet text alone.\n"
+            "Memory hits (labeled `id:xxxx`, or `memory` for a malformed entry) "
+            "show the full self-contained entry — you may act on them directly, "
+            "and run their `Verify:` line to confirm the claim against the code.\n"
+            "README hits (labeled `[section]`) are pointers into a larger "
+            "cross-referencing section — load the section before acting on them: "
+            "`load_feature_context(slug, sections=['<section>'])`.\n"
             "**Redirect signal:** if a hit's text says something like \"Wrong-KB "
             'duplicate" or names an authoritative KB for this topic, load THAT '
             "slug — the snippet is telling you where the real answer lives, not "
@@ -1988,7 +2031,7 @@ def load_feature_context(
         readme_stripped = ""
         related_hint = ""
         if readme.exists():
-            readme_text = readme.read_text()
+            readme_text = readme.read_text(encoding="utf-8")
             readme_stripped = _strip_readme_for_context(readme_text, keep_markers=True)
             m = re.search(
                 r"<related_tickets>\s*(.*?)\s*</related_tickets>",
@@ -2219,7 +2262,7 @@ def load_feature_context(
             parts.append(footer)
             result = "\n\n".join(parts)
         else:
-            result = _render_budgeted(
+            result, rendered_readme, rendered_memories = _render_budgeted(
                 slug=slug,
                 header=header,
                 hints=hints_text,
@@ -2231,6 +2274,19 @@ def load_feature_context(
                 sections_filter=sections,
                 max_chars=max_chars,
             )
+            # Restate the header from what actually rendered. The counts above
+            # (readme_loaded / memories_loaded) measure the unfiltered source;
+            # a sections=/max_chars= filter shrinks the payload after them, so
+            # the header would otherwise over-report (measured ~2.9x on a
+            # single-section load) and mislead the model about how much context
+            # it received.
+            rendered_total = rendered_readme + rendered_memories
+            header = (
+                f"# Feature context: {d.parent.name}/{slug}"
+                f" (~{rendered_total // 4:,} tokens: README ~{rendered_readme // 4:,}"
+                f" + memories ~{rendered_memories // 4:,})"
+            )
+            result = header + result[result.find("\n") :]
 
         log_kwargs["slug"] = slug
         log_kwargs["readme_chars"] = readme_loaded
@@ -2782,7 +2838,7 @@ def _find_near_duplicate(
     readme = d / "README.md"
     if not readme.exists():
         return None
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
     span = _section_span(text, section)
     if span is None:
         return None
@@ -2864,7 +2920,7 @@ def _apply_promotion(
     writing the memory entry is the primary act and must not fail with it.
     """
     readme = d / "README.md"
-    text = readme.read_text()
+    text = readme.read_text(encoding="utf-8")
 
     spans: dict[str, tuple[int, int]] = {}
     bodies: dict[str, list[str]] = {}
@@ -3213,7 +3269,7 @@ def save_memory(slug: str, content: str, project: str = "") -> str:
                 f"{length_note}{footer}{promo}{_health_hint_suffix(d)}"
             )
 
-        text = memories_file.read_text()
+        text = memories_file.read_text(encoding="utf-8")
         lines = text.splitlines()
 
         inserted = False
@@ -3319,14 +3375,18 @@ def init_feature(
         # and safe_substitute() leaves any unrecognized $-token untouched instead
         # of raising -- .format() would crash on the first stray `{...}` and
         # .replace() would silently corrupt a `{slug}`-shaped illustration.
-        readme_tmpl = Template((TEMPLATES_DIR / "feature-README.md").read_text())
+        readme_tmpl = Template(
+            (TEMPLATES_DIR / "feature-README.md").read_text(encoding="utf-8")
+        )
         _atomic_write(
             feature_dir / "README.md",
             readme_tmpl.safe_substitute(name=name, slug=slug, summary=summary),
         )
 
         username = _resolve_username(confirmed=username)
-        memories_tmpl = Template((TEMPLATES_DIR / "feature-memories.md").read_text())
+        memories_tmpl = Template(
+            (TEMPLATES_DIR / "feature-memories.md").read_text(encoding="utf-8")
+        )
         _atomic_write(
             feature_dir / f"memories-{username}.md",
             memories_tmpl.safe_substitute(name=name),
@@ -3336,7 +3396,7 @@ def init_feature(
         index_file = _kb_root(target) / "features.md"
         new_row = f"| {name} | {slug} | {ticket} | {branch} | {summary} | {today} |"
         if index_file.exists():
-            text = index_file.read_text()
+            text = index_file.read_text(encoding="utf-8")
             lines = text.splitlines()
             insert_at = len(lines)
             for i, line in enumerate(lines):
@@ -3346,14 +3406,20 @@ def init_feature(
             lines.insert(insert_at, new_row)
             _atomic_write(index_file, "\n".join(lines) + "\n")
         else:
-            index_tmpl = Template((TEMPLATES_DIR / "features-index.md").read_text())
+            index_tmpl = Template(
+                (TEMPLATES_DIR / "features-index.md").read_text(encoding="utf-8")
+            )
             _atomic_write(index_file, index_tmpl.safe_substitute(first_row=new_row))
 
         _ensure_git_repo(_kb_root(target))
 
         setup_hint = ""
         if not _has_recall_setup(target):
-            snippet = (TEMPLATES_DIR / "claude-md-snippet.md").read_text().strip()
+            snippet = (
+                (TEMPLATES_DIR / "claude-md-snippet.md")
+                .read_text(encoding="utf-8")
+                .strip()
+            )
             setup_hint = (
                 f"\n\n⚠  Not configured: {target / 'CLAUDE.local.md'} has no recall-mcp section.\n"
                 f"Add this to your CLAUDE.local.md (gitignored — per-developer, not team-shared):\n\n{snippet}"
@@ -3469,7 +3535,7 @@ def report_miss(slug: str, description: str, project: str = "") -> str:
                 f"# Engineering Memory — {username}\n\n*Prepend-only.*\n\n---\n\n{new_entry}\n",
             )
         else:
-            text = memories_file.read_text()
+            text = memories_file.read_text(encoding="utf-8")
             lines = text.splitlines()
             inserted = False
             for i, line in enumerate(lines):
@@ -3603,7 +3669,7 @@ def update_readme(
             )
 
         readme = d / "README.md"
-        text = readme.read_text()
+        text = readme.read_text(encoding="utf-8")
 
         open_tag = f"<{section}>"
         close_tag = f"</{section}>"
@@ -3770,7 +3836,7 @@ def update_feature_index(
             _log_reject(log_kwargs, "no index file")
             return f"No features.md index found for project '{target.name}'."
 
-        text = index_file.read_text()
+        text = index_file.read_text(encoding="utf-8")
         lines = text.splitlines()
         row_idx = None
         for i, line in enumerate(lines):

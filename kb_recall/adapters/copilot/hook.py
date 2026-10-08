@@ -60,6 +60,7 @@ from kb_recall.hooks.hook_helpers import (
     load_asked,
     mark_asked,
 )
+from kb_recall.stdio import force_utf8_stdio
 
 KB_ROOT = Path.home() / ".recall-mcp"
 
@@ -192,7 +193,7 @@ def _slug_for(cwd: Path, branch: str | None = None) -> str | None:
         return None
 
     try:
-        return find_slug_for_branch(index.read_text(), branch)
+        return find_slug_for_branch(index.read_text(encoding="utf-8"), branch)
     except Exception:
         return None
 
@@ -356,6 +357,9 @@ def main() -> None:
     Never raises. A hook that crashes must not take the user's session with it —
     an empty object is always a safe answer.
     """
+    # The payload arrives as UTF-8 on stdin; a Windows pipe would hand it to us
+    # as cp1252, where a non-ASCII prompt either mangles or raises.
+    force_utf8_stdio()
     event = sys.argv[1] if len(sys.argv) > 1 else SUPPORTED_EVENTS[0]
 
     try:

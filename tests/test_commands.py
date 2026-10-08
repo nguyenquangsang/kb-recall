@@ -73,7 +73,7 @@ def test_every_command_has_a_skill_sibling():
 
 @pytest.mark.parametrize("path", _command_paths(), ids=lambda p: p.stem)
 def test_first_line_carries_the_arguments_marker(path: Path):
-    first = path.read_text().splitlines()[0].rstrip()
+    first = path.read_text(encoding="utf-8").splitlines()[0].rstrip()
     assert first.endswith(ARGUMENTS_MARKER), (
         f"{path.name}: first line must end with {ARGUMENTS_MARKER!r} — got ...{first[-50:]!r}"
     )
@@ -81,7 +81,7 @@ def test_first_line_carries_the_arguments_marker(path: Path):
 
 @pytest.mark.parametrize("path", _command_paths(), ids=lambda p: p.stem)
 def test_has_when_to_use_with_a_never_boundary(path: Path):
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert re.search(r"^## When to use$", text, re.MULTILINE), (
         f"{path.name}: missing a `## When to use` heading"
     )
@@ -90,7 +90,7 @@ def test_has_when_to_use_with_a_never_boundary(path: Path):
 
 @pytest.mark.parametrize("name", sorted(SLUG_DETECTING))
 def test_slug_detecting_commands_have_a_slug_step(name: str):
-    text = (COMMANDS_DIR / f"{name}.md").read_text()
+    text = (COMMANDS_DIR / f"{name}.md").read_text(encoding="utf-8")
     assert SLUG_STEP in text, f"{name}.md: missing `{SLUG_STEP}`"
     assert text.index(SLUG_STEP) < text.index("## Step 2"), (
         f"{name}.md: the slug step must come before Step 2"

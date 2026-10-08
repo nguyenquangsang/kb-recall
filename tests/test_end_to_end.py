@@ -25,7 +25,7 @@ def fixed_ids(monkeypatch):
 
 
 def _section(d, name):
-    text = (d / "README.md").read_text()
+    text = (d / "README.md").read_text(encoding="utf-8")
     return text.split(f"<{name}>")[1].split(f"</{name}>")[0]
 
 
@@ -48,7 +48,7 @@ def test_full_tool_lifecycle(kb_env, fixed_ids):
     assert f"Created feature KB '{slug}'" in created
     assert (d / "README.md").exists()
     assert (d / "memories-alice.md").exists()
-    assert slug in (kb_env / "myproj" / "features.md").read_text()
+    assert slug in (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
 
     # 2. save_memory([gotcha]) promotes into critical_warnings with a marker.
     gotcha = "**[gotcha] pooled conns are per-process**\nWhat: w\nWhy: y\nApply: a"
@@ -76,12 +76,14 @@ def test_full_tool_lifecycle(kb_env, fixed_ids):
 
     # 6. update_readme: diff first (writes nothing), then confirm (writes).
     rule = "**[rule] payment must be idempotent**"
-    before = (d / "README.md").read_text()
+    before = (d / "README.md").read_text(encoding="utf-8")
     diff = server.update_readme(
         slug=slug, section="business_rules", content=rule, project="myproj"
     )
     assert diff  # a diff came back
-    assert (d / "README.md").read_text() == before  # nothing written yet
+    assert (d / "README.md").read_text(
+        encoding="utf-8"
+    ) == before  # nothing written yet
     confirmed = server.update_readme(
         slug=slug,
         section="business_rules",
@@ -97,4 +99,6 @@ def test_full_tool_lifecycle(kb_env, fixed_ids):
         slug=slug, description="Forgot webhooks are unordered.", project="myproj"
     )
     assert "[MISS]" in r
-    assert "Forgot webhooks are unordered." in (d / "memories-alice.md").read_text()
+    assert "Forgot webhooks are unordered." in (d / "memories-alice.md").read_text(
+        encoding="utf-8"
+    )

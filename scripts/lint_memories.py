@@ -64,7 +64,7 @@ def parse_entries(text):
 
 def lint_file(path):
     """Return a list of finding strings for one memories*.md file."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     entries = list(parse_entries(text))
     known_ids = {entry_id for _, entry_id, _, _ in entries}
 
@@ -136,7 +136,7 @@ def supersede_stats(path):
     decision evolution, not necessarily an error). Not a proxy for truth, just
     a directional signal, not a measurement (measurability caveat, 2026-07-14).
     """
-    entries = list(parse_entries(path.read_text()))
+    entries = list(parse_entries(path.read_text(encoding="utf-8")))
     by_id = {eid: entry_date for entry_date, eid, _, _ in entries}
     total = len(entries)
     if total == 0:
@@ -172,7 +172,7 @@ def main():
             continue
         for memories_file in sorted(project_dir.glob("*/memories-*.md")):
             total_files += 1
-            entries = list(parse_entries(memories_file.read_text()))
+            entries = list(parse_entries(memories_file.read_text(encoding="utf-8")))
             total_entries += len(entries)
             findings = lint_file(memories_file)
             if findings:
