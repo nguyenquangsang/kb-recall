@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import fake_home
+
 REPO_ROOT = Path(__file__).parent.parent
 HOOK = REPO_ROOT / "kb_recall" / "hooks" / "prompt_submit.py"
 
@@ -26,7 +28,7 @@ def _make_env(tmp_path, branch=None):
     """Base env factory. If branch is given, initializes a git repo on that branch."""
     project_dir = tmp_path / "my-project"
     project_dir.mkdir()
-    (project_dir / "CLAUDE.md").write_text("recall-mcp")
+    (project_dir / "CLAUDE.md").write_text("recall-mcp", encoding="utf-8")
 
     if branch:
         _git(["init"], project_dir)
@@ -36,7 +38,9 @@ def _make_env(tmp_path, branch=None):
 
     kb_root = tmp_path / ".recall-mcp"
     kb_root.mkdir()
-    (kb_root / "config.json").write_text(json.dumps({"projects": [str(project_dir)]}))
+    (kb_root / "config.json").write_text(
+        json.dumps({"projects": [str(project_dir)]}), encoding="utf-8"
+    )
 
     return {
         "home": tmp_path,
@@ -56,7 +60,8 @@ def env(tmp_path):
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Summary |\n"
         "|---|---|---|\n"
-        "| Test Feature | test-feat | A test feature |\n"
+        "| Test Feature | test-feat | A test feature |\n",
+        encoding="utf-8",
     )
     return e
 
@@ -71,7 +76,8 @@ def env_matched(tmp_path):
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
         "|---|---|---|---|---|---|\n"
-        "| Test Feature | test-feat | | feat/test-feature | A test feature | 2026-06-27 |\n"
+        "| Test Feature | test-feat | | feat/test-feature | A test feature | 2026-06-27 |\n",
+        encoding="utf-8",
     )
     return e
 
@@ -86,7 +92,8 @@ def env_unmatched(tmp_path):
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
         "|---|---|---|---|---|---|\n"
-        "| Test Feature | test-feat | | feat/test-feature | A test feature | 2026-06-27 |\n"
+        "| Test Feature | test-feat | | feat/test-feature | A test feature | 2026-06-27 |\n",
+        encoding="utf-8",
     )
     return e
 
@@ -102,7 +109,8 @@ def env_malformed_row(tmp_path):
         "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
         "|---|---|---|---|---|---|\n"
         # Missing the blank Ticket(s) cell — 5 cols instead of 6.
-        "| Test Feature | test-feat | feat/test-feature | A test feature | 2026-06-27 |\n"
+        "| Test Feature | test-feat | feat/test-feature | A test feature | 2026-06-27 |\n",
+        encoding="utf-8",
     )
     return e
 
@@ -115,10 +123,10 @@ def run_hook(env, session_id, cwd=None, transcript_path=None, prompt=""):
         [sys.executable, str(HOOK)],
         input=json.dumps(payload),
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         env={
             **os.environ,
-            "HOME": str(env["home"]),
+            **fake_home(env["home"]),
             "PYTHONPATH": str(REPO_ROOT),
         },
         cwd=str(cwd or env["project"]),
@@ -131,14 +139,17 @@ def run_hook(env, session_id, cwd=None, transcript_path=None, prompt=""):
 def env_missing_snippet(tmp_path):
     """Env where the project's CLAUDE.md has no recall-mcp section at all."""
     e = _make_env(tmp_path)
-    (e["project"] / "CLAUDE.md").write_text("# Just a normal project\n")
+    (e["project"] / "CLAUDE.md").write_text(
+        "# Just a normal project\n", encoding="utf-8"
+    )
     proj_kb = e["kb_root"] / "my-project"
     proj_kb.mkdir()
     (proj_kb / "features.md").write_text(
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Summary |\n"
         "|---|---|---|\n"
-        "| Test Feature | test-feat | A test feature |\n"
+        "| Test Feature | test-feat | A test feature |\n",
+        encoding="utf-8",
     )
     return e
 
@@ -153,7 +164,8 @@ def env_unconfigured(tmp_path):
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Summary |\n"
         "|---|---|---|\n"
-        "| Secret Feature | secret-feat | Should never leak to other dirs |\n"
+        "| Secret Feature | secret-feat | Should never leak to other dirs |\n",
+        encoding="utf-8",
     )
     other_dir = tmp_path / "unrelated-project"
     other_dir.mkdir()
@@ -217,7 +229,7 @@ class TestClaudeMdWarning:
 class TestTurnCounter:
     def _seed_slug(self, env, session_id, slug):
         """Write a slug into session-state so active_slug is detected."""
-        with env["state_file"].open("a") as f:
+        with env["state_file"].open("a", encoding="utf-8") as f:
             f.write(json.dumps({"session_id": session_id, "slug": slug}) + "\n")
 
     def test_no_reminder_before_interval(self, env):
@@ -255,7 +267,7 @@ class TestTurnCounter:
 
 class TestActiveSlugDeterminism:
     def test_names_the_alphabetically_first_slug_when_multiple_active(self, env):
-        with env["state_file"].open("a") as f:
+        with env["state_file"].open("a", encoding="utf-8") as f:
             f.write(json.dumps({"session_id": "s1", "slug": "zzz-feat"}) + "\n")
             f.write(json.dumps({"session_id": "s1", "slug": "aaa-feat"}) + "\n")
         for _ in range(7):
@@ -272,7 +284,7 @@ class TestActiveSlugDeterminism:
 
 class TestMissTurnCounter:
     def _seed_slug(self, env, session_id, slug):
-        with env["state_file"].open("a") as f:
+        with env["state_file"].open("a", encoding="utf-8") as f:
             f.write(json.dumps({"session_id": session_id, "slug": slug}) + "\n")
 
     def test_no_miss_reminder_before_interval(self, env):
@@ -461,21 +473,21 @@ class TestSessionIdFile:
         run_hook(env, "test-session-abc")
         session_file = env["kb_root"] / "current-session"
         assert session_file.exists(), "current-session file not created"
-        assert session_file.read_text().strip() == "test-session-abc"
+        assert session_file.read_text(encoding="utf-8").strip() == "test-session-abc"
 
     def test_overwrites_on_new_session(self, env):
         run_hook(env, "session-1")
         run_hook(env, "session-2")
         session_file = env["kb_root"] / "current-session"
-        assert session_file.read_text().strip() == "session-2"
+        assert session_file.read_text(encoding="utf-8").strip() == "session-2"
 
     def test_no_file_written_without_session_id(self, env):
         subprocess.run(
             [sys.executable, str(HOOK)],
             input=json.dumps({}),  # no session_id key
             capture_output=True,
-            text=True,
-            env={"HOME": str(env["home"]), "PYTHONPATH": str(REPO_ROOT)},
+            encoding="utf-8",
+            env={**fake_home(env["home"]), "PYTHONPATH": str(REPO_ROOT)},
             cwd=str(env["project"]),
             check=False,  # the assertion is on the file, not on the exit status
         )
@@ -494,11 +506,13 @@ def env_fresh_project(tmp_path):
     """Registered project with no KB_ROOT/<project> dir yet (never ran init_feature)."""
     project_dir = tmp_path / "brand-new-project"
     project_dir.mkdir()
-    (project_dir / "CLAUDE.md").write_text("recall-mcp")
+    (project_dir / "CLAUDE.md").write_text("recall-mcp", encoding="utf-8")
 
     kb_root = tmp_path / ".recall-mcp"
     kb_root.mkdir()
-    (kb_root / "config.json").write_text(json.dumps({"projects": [str(project_dir)]}))
+    (kb_root / "config.json").write_text(
+        json.dumps({"projects": [str(project_dir)]}), encoding="utf-8"
+    )
     # Deliberately no kb_root/"brand-new-project" dir — simulates `recall setup`
     # having run but init_feature never called for this project yet.
 
@@ -515,14 +529,15 @@ def env_two_projects(tmp_path):
     for name in ("project-a", "project-b"):
         proj_dir = tmp_path / name
         proj_dir.mkdir()
-        (proj_dir / "CLAUDE.md").write_text("recall-mcp")
+        (proj_dir / "CLAUDE.md").write_text("recall-mcp", encoding="utf-8")
         proj_kb = kb_root / name
         proj_kb.mkdir()
         (proj_kb / "features.md").write_text(
             "# Feature Knowledge Base Index\n\n"
             "| Feature | Slug | Summary |\n"
             "|---|---|---|\n"
-            f"| {name} feat | {name}-feat | desc |\n"
+            f"| {name} feat | {name}-feat | desc |\n",
+            encoding="utf-8",
         )
         projects[name] = {"home": tmp_path, "project": proj_dir, "kb_root": kb_root}
 
@@ -534,7 +549,8 @@ def env_two_projects(tmp_path):
                     str(projects["project-b"]["project"]),
                 ]
             }
-        )
+        ),
+        encoding="utf-8",
     )
     return projects
 
@@ -559,7 +575,7 @@ class TestPerProjectStateFile:
         state_a = (
             env_two_projects["project-a"]["kb_root"] / "project-a" / "session-state"
         )
-        with state_a.open("a") as f:
+        with state_a.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"session_id": "s1", "slug": "project-a-feat"}) + "\n")
         for _ in range(7):
             run_hook(env_two_projects["project-a"], "s1")
@@ -572,7 +588,7 @@ class TestPerProjectStateFile:
         state_b = (
             env_two_projects["project-b"]["kb_root"] / "project-b" / "session-state"
         )
-        b_lines = state_b.read_text().splitlines()
+        b_lines = state_b.read_text(encoding="utf-8").splitlines()
         assert len(b_lines) <= 2  # just this session's own __index__ + __turn__
 
 
@@ -609,7 +625,7 @@ def _write_expensive_cold_start_transcript(path, idle_minutes=56, tokens=150_000
             }
         ),
     ]
-    path.write_text("\n".join(lines) + "\n")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 @pytest.fixture
@@ -625,7 +641,8 @@ def env_expensive_cold_start(tmp_path):
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Summary |\n"
         "|---|---|---|\n"
-        "| Test Feature | test-feat | A test feature |\n"
+        "| Test Feature | test-feat | A test feature |\n",
+        encoding="utf-8",
     )
     transcript = tmp_path / "transcript.jsonl"
     _write_expensive_cold_start_transcript(transcript)
@@ -635,9 +652,9 @@ def env_expensive_cold_start(tmp_path):
 
 def _set_block_idle(env, value):
     cfg_file = env["kb_root"] / "config.json"
-    cfg = json.loads(cfg_file.read_text())
+    cfg = json.loads(cfg_file.read_text(encoding="utf-8"))
     cfg["block_idle"] = value
-    cfg_file.write_text(json.dumps(cfg))
+    cfg_file.write_text(json.dumps(cfg), encoding="utf-8")
 
 
 class TestBlockIdleToggle:

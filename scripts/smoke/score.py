@@ -60,7 +60,7 @@ def score_run(records, scenario) -> tuple:
 
 
 def load_scenario(path) -> dict:
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def main() -> int:

@@ -50,7 +50,7 @@ def test_ships_exactly_the_eight_copilot_skills():
 def test_name_matches_directory_and_is_valid(path: Path):
     """The fail-silent trap: name != directory, or an invalid char, loads
     nothing with no error. Also enforced: lowercase+digits+hyphen, <=64."""
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     m = _NAME_RE.search(_frontmatter(text))
     assert m, f"{path}: frontmatter has no `name:` field"
     name = m.group(1)
@@ -62,14 +62,14 @@ def test_name_matches_directory_and_is_valid(path: Path):
 
 @pytest.mark.parametrize("path", _skill_paths(), ids=lambda p: p.parent.name)
 def test_description_is_present_and_bounded(path: Path):
-    m = _DESC_RE.search(_frontmatter(path.read_text()))
+    m = _DESC_RE.search(_frontmatter(path.read_text(encoding="utf-8")))
     assert m, f"{path}: frontmatter has no `description:` field"
     assert 1 <= len(m.group(1)) <= 1024
 
 
 @pytest.mark.parametrize("path", _skill_paths(), ids=lambda p: p.parent.name)
 def test_when_to_use_has_a_never_boundary(path: Path):
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert "## When to use" in text, f"{path}: missing `## When to use`"
     assert re.search(r"Never\s", text), f"{path}: missing the `Never...` boundary"
 

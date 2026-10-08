@@ -15,7 +15,7 @@ def load_asked(sid: str, state_file: Path) -> set:
     if not state_file.exists():
         return set()
     asked = set()
-    for line in state_file.read_text().splitlines():
+    for line in state_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -30,11 +30,11 @@ def load_asked(sid: str, state_file: Path) -> set:
 
 def mark_asked(sid: str, slug: str, state_file: Path) -> None:
     """Append slug to session-state (dedup guard — prevents repeating prompts)."""
-    with state_file.open("a") as f:
+    with state_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"session_id": sid, "slug": slug}) + "\n")
-    lines = state_file.read_text().splitlines()
+    lines = state_file.read_text(encoding="utf-8").splitlines()
     if len(lines) > 500:
-        state_file.write_text("\n".join(lines[-500:]) + "\n")
+        state_file.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
 
 
 def append_turn(sid: str, state_file: Path) -> None:
@@ -53,11 +53,11 @@ def append_turn(sid: str, state_file: Path) -> None:
         "n": count_turns(sid, state_file) + 1,
         "ts": datetime.now(timezone.utc).isoformat(),
     }
-    with state_file.open("a") as f:
+    with state_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
-    lines = state_file.read_text().splitlines()
+    lines = state_file.read_text(encoding="utf-8").splitlines()
     if len(lines) > 500:
-        state_file.write_text("\n".join(lines[-500:]) + "\n")
+        state_file.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
 
 
 def last_turn_ts(sid: str, state_file: Path):
@@ -69,7 +69,7 @@ def last_turn_ts(sid: str, state_file: Path):
     if not state_file.exists():
         return None
     last = None
-    for line in state_file.read_text().splitlines():
+    for line in state_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -99,7 +99,7 @@ def last_size_warn_tokens(sid: str, state_file: Path):
     if not state_file.exists():
         return None
     last = None
-    for line in state_file.read_text().splitlines():
+    for line in state_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -119,11 +119,11 @@ def last_size_warn_tokens(sid: str, state_file: Path):
 def mark_size_warn(sid: str, state_file: Path, tokens: int) -> None:
     """Record that the size-only nudge fired at this context_tokens value."""
     entry = {"session_id": sid, "slug": "__sizewarn__", "tokens": tokens}
-    with state_file.open("a") as f:
+    with state_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
-    lines = state_file.read_text().splitlines()
+    lines = state_file.read_text(encoding="utf-8").splitlines()
     if len(lines) > 500:
-        state_file.write_text("\n".join(lines[-500:]) + "\n")
+        state_file.write_text("\n".join(lines[-500:]) + "\n", encoding="utf-8")
 
 
 def parse_transcript_idle(transcript_path: str):
@@ -141,7 +141,7 @@ def parse_transcript_idle(transcript_path: str):
     if not path.exists():
         return None, None
     try:
-        lines = path.read_text().splitlines()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except Exception:
         return None, None
 
@@ -323,7 +323,7 @@ def count_turns(sid: str, state_file: Path) -> int:
         return 0
     max_n = 0
     line_count = 0
-    for line in state_file.read_text().splitlines():
+    for line in state_file.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue

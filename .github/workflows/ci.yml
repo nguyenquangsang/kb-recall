@@ -46,3 +46,55 @@ jobs:
 
       - name: Test
         run: uv run pytest -q
+
+      # The same class of bug as the Windows job below, reproduced without a
+      # Windows machine in the loop: Python hands a *piped* stream the locale
+      # encoding, and LC_ALL=C forces US-ASCII — stricter than cp1252, which
+      # only leaves five bytes undefined (0x81, 0x8D, 0x8F, 0x90, 0x9D).
+      # Measured on this repo before the encoding sweep: 123 failed + 16 errors
+      # here, 458 passed after. Runs on every matrix entry rather than one,
+      # because a version-conditional step is a step that can silently stop
+      # running.
+      - name: Test (non-UTF8 locale)
+        run: PYTHONUTF8=0 LC_ALL=C uv run pytest -q
+
+  windows:
+    # Reproduces the real failure rather than approximating it: a Windows
+    # runner's pipes default to cp1252, which is what made `recall setup` die
+    # with `UnicodeDecodeError: 'charmap' codec can't decode byte 0x8f` while
+    # reading its own template. It is also the only lane that exercises
+    # Windows-only behaviour at all — path separators, symlink privilege, and
+    # `select` on a pipe, which is sockets-only on Windows.
+    #
+    # One Python version, not the ubuntu matrix: every failure this job exists
+    # to catch is locale- or platform-driven, not version-driven, and Windows
+    # runners bill at 2x the Linux rate.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --python 3.12
+
+      # No Lint/Type check here on purpose. Ruff is platform-independent, so the
+      # ubuntu job already covers it, and mypy resolves its stubs *per platform*
+      # — running it on Windows would report on typeshed's Windows views of
+      # stdlib calls this package only ever makes on POSIX, which is noise
+      # rather than signal. This job answers one question: does the suite pass
+      # on Windows?
+      #
+      # Two tests that assert POSIX-only behaviour skip here instead of failing,
+      # each with its reason in the skip message: `_claude_cli()`'s executable
+      # bit (Windows has none) and the symlink test (needs
+      # SeCreateSymbolicLinkPrivilege). A green run therefore means the
+      # cross-platform suite passed, not that nothing was checked.
+      - name: Test
+        run: uv run pytest -q

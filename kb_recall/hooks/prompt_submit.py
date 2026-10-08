@@ -102,6 +102,7 @@ from kb_recall.hooks.hook_helpers import (
     mark_size_warn,
     pick_active_slug,
 )
+from kb_recall.stdio import force_utf8_stdio
 
 SAVE_REMINDER_INTERVAL = 8  # remind every N turns when KB is active
 MISS_REMINDER_INTERVAL = 16  # remind every N turns — separate cadence: misses are
@@ -163,7 +164,7 @@ def _kb_stats(kb_root: Path, project_name: str, slug: str) -> str:
         readme = kb_root / project_name / slug / "README.md"
         if not readme.exists():
             return ""
-        text = readme.read_text()
+        text = readme.read_text(encoding="utf-8")
 
         arch = _extract_section(text, "architecture")
         decisions = len(re.findall(r"^\*\*\[", arch, re.MULTILINE))
@@ -174,7 +175,11 @@ def _kb_stats(kb_root: Path, project_name: str, slug: str) -> str:
         misses = 0
         for mem_file in (kb_root / project_name / slug).glob("memories*.md"):
             misses += len(
-                re.findall(r"^- \*\*.*\[MISS\]", mem_file.read_text(), re.MULTILINE)
+                re.findall(
+                    r"^- \*\*.*\[MISS\]",
+                    mem_file.read_text(encoding="utf-8"),
+                    re.MULTILINE,
+                )
             )
 
         parts = []
@@ -191,6 +196,9 @@ def _kb_stats(kb_root: Path, project_name: str, slug: str) -> str:
 
 
 def main() -> None:
+    # Before any stream is touched: a Windows pipe carries the locale encoding,
+    # which rejects both the UTF-8 payload on stdin and the KB text we print.
+    force_utf8_stdio()
     if not CFG.exists():
         sys.exit()
 
@@ -208,10 +216,10 @@ def main() -> None:
 
     if session_id:
         with contextlib.suppress(Exception):
-            (KB_ROOT / "current-session").write_text(session_id)
+            (KB_ROOT / "current-session").write_text(session_id, encoding="utf-8")
 
     try:
-        data = json.loads(CFG.read_text())
+        data = json.loads(CFG.read_text(encoding="utf-8"))
     except Exception as e:
         print(f"[recall-mcp] ⚠ config.json malformed ({e}) — fix {CFG}")
         sys.exit()
@@ -322,14 +330,20 @@ def main() -> None:
         local_md = current / "CLAUDE.local.md"
         legacy_md = current / "CLAUDE.md"
         has_section = (
-            "recall-mcp" in local_md.read_text() if local_md.exists() else False
-        ) or ("recall-mcp" in legacy_md.read_text() if legacy_md.exists() else False)
+            "recall-mcp" in local_md.read_text(encoding="utf-8")
+            if local_md.exists()
+            else False
+        ) or (
+            "recall-mcp" in legacy_md.read_text(encoding="utf-8")
+            if legacy_md.exists()
+            else False
+        )
         if not has_section:
             mark_asked(session_id, CLAUDE_MD_KEY, state_file)
             snippet_path = (
                 Path(__file__).parent.parent / "templates" / "claude-md-snippet.md"
             )
-            snippet = snippet_path.read_text().strip()
+            snippet = snippet_path.read_text(encoding="utf-8").strip()
             print(f"[recall-mcp] ⚠  {local_md} has no recall-mcp section.")
             print(
                 f"Add this to {local_md} manually (gitignored — per-developer, not team-shared):\n"
@@ -345,7 +359,7 @@ def main() -> None:
         index = KB_ROOT / current.name / "features.md"
         if index.exists():
             print(f"[recall-mcp: {current.name}]")
-            print(index.read_text().strip())
+            print(index.read_text(encoding="utf-8").strip())
             print()
 
     # --- Unconfigured-project hint (once per directory, persists across sessions) ---
@@ -388,7 +402,7 @@ def main() -> None:
                 index_file = KB_ROOT / current.name / "features.md"
                 malformed = []
                 if index_file.exists():
-                    table_text = index_file.read_text()
+                    table_text = index_file.read_text(encoding="utf-8")
                     matched = find_slug_for_branch(table_text, branch)
                     malformed = find_malformed_rows(table_text)
 
@@ -529,7 +543,7 @@ def main() -> None:
                 entry["slug"] = active_slug
             if current:
                 entry["project"] = current.name
-            with (KB_ROOT / "usage.jsonl").open("a") as f:
+            with (KB_ROOT / "usage.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
         except Exception:
             pass

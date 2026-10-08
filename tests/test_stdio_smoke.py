@@ -8,12 +8,14 @@ tests never touch: the actual wire protocol the client harness uses.
 
 import json
 import os
-import select
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
+
+from tests.conftest import fake_home
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_TOOLS = {
@@ -34,13 +36,29 @@ def _send(proc, obj):
 
 
 def _read_line(proc, timeout=10.0):
-    ready, _, _ = select.select([proc.stdout], [], [], timeout)
-    if not ready:
+    """Read one NDJSON line, bounded by a timeout that also works on Windows.
+
+    Deliberately not `select.select`: on Windows it accepts sockets only and
+    raises OSError on a pipe, so this smoke test could not run there at all. A
+    reader thread is the portable equivalent — it performs the blocking
+    `readline()` while the main thread bounds the wait. The thread is a daemon
+    so a hung server cannot keep the test process alive after a failure.
+    """
+    lines: list[str] = []
+
+    def pump() -> None:
+        line = proc.stdout.readline()
+        if line:
+            lines.append(line)
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    reader.join(timeout)
+    if reader.is_alive():
         raise TimeoutError("recall-server did not respond")
-    line = proc.stdout.readline()
-    if not line:
+    if not lines:
         raise EOFError("recall-server closed stdout")
-    return json.loads(line)
+    return json.loads(lines[0])
 
 
 def _initialize(proc):
@@ -68,9 +86,10 @@ def server_proc(tmp_path):
     home = tmp_path / "home"
     (home / ".recall-mcp").mkdir(parents=True)
     (home / ".recall-mcp" / "config.json").write_text(
-        json.dumps({"projects": [str(tmp_path / "myproj")]})
+        json.dumps({"projects": [str(tmp_path / "myproj")]}),
+        encoding="utf-8",
     )
-    env = dict(os.environ, HOME=str(home))
+    env = {**os.environ, **fake_home(home)}
     proc = subprocess.Popen(
         [sys.executable, "-m", "kb_recall.server"],
         cwd=REPO_ROOT,
@@ -78,7 +97,7 @@ def server_proc(tmp_path):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        encoding="utf-8",
     )
     try:
         yield home, proc

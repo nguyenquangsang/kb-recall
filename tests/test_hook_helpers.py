@@ -27,7 +27,8 @@ class TestLoadAsked:
     def test_returns_empty_for_different_session(self, tmp_path):
         state = tmp_path / "state"
         state.write_text(
-            json.dumps({"session_id": OTHER_SID, "slug": "feature-x"}) + "\n"
+            json.dumps({"session_id": OTHER_SID, "slug": "feature-x"}) + "\n",
+            encoding="utf-8",
         )
         assert load_asked(SID, state) == set()
 
@@ -39,14 +40,16 @@ class TestLoadAsked:
             + json.dumps({"session_id": SID, "slug": "__index__"})
             + "\n"
             + json.dumps({"session_id": OTHER_SID, "slug": "feature-b"})
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         assert load_asked(SID, state) == {"feature-a", "__index__"}
 
     def test_skips_malformed_lines(self, tmp_path):
         state = tmp_path / "state"
         state.write_text(
-            "not-json\n" + json.dumps({"session_id": SID, "slug": "ok"}) + "\n" + "\n"
+            "not-json\n" + json.dumps({"session_id": SID, "slug": "ok"}) + "\n" + "\n",
+            encoding="utf-8",
         )
         assert load_asked(SID, state) == {"ok"}
 
@@ -60,7 +63,7 @@ class TestMarkAsked:
     def test_creates_file_and_appends(self, tmp_path):
         state = tmp_path / "state"
         mark_asked(SID, "my-slug", state)
-        lines = state.read_text().splitlines()
+        lines = state.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 1
         assert json.loads(lines[0]) == {"session_id": SID, "slug": "my-slug"}
 
@@ -68,7 +71,10 @@ class TestMarkAsked:
         state = tmp_path / "state"
         mark_asked(SID, "slug-a", state)
         mark_asked(SID, "slug-b", state)
-        slugs = {json.loads(line)["slug"] for line in state.read_text().splitlines()}
+        slugs = {
+            json.loads(line)["slug"]
+            for line in state.read_text(encoding="utf-8").splitlines()
+        }
         assert slugs == {"slug-a", "slug-b"}
 
     def test_caps_at_500_lines(self, tmp_path):
@@ -77,10 +83,11 @@ class TestMarkAsked:
             "\n".join(
                 json.dumps({"session_id": "old", "slug": f"s{i}"}) for i in range(500)
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         mark_asked(SID, "new-slug", state)
-        lines = state.read_text().splitlines()
+        lines = state.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 500
         assert json.loads(lines[-1])["slug"] == "new-slug"
 
@@ -94,7 +101,7 @@ class TestAppendTurn:
     def test_appends_turn_entry(self, tmp_path):
         state = tmp_path / "state"
         append_turn(SID, state)
-        entry = json.loads(state.read_text().strip())
+        entry = json.loads(state.read_text(encoding="utf-8").strip())
         assert entry["session_id"] == SID
         assert entry["slug"] == "__turn__"
         assert "ts" in entry
@@ -104,7 +111,7 @@ class TestAppendTurn:
         append_turn(SID, state)
         append_turn(SID, state)
         append_turn(SID, state)
-        assert state.read_text().count("__turn__") == 3
+        assert state.read_text(encoding="utf-8").count("__turn__") == 3
 
     def test_caps_at_500_lines(self, tmp_path):
         state = tmp_path / "state"
@@ -112,16 +119,17 @@ class TestAppendTurn:
             "\n".join(
                 json.dumps({"session_id": "old", "slug": f"s{i}"}) for i in range(500)
             )
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         append_turn(SID, state)
-        assert len(state.read_text().splitlines()) == 500
+        assert len(state.read_text(encoding="utf-8").splitlines()) == 500
 
     def test_turn_entry_carries_running_count(self, tmp_path):
         state = tmp_path / "state"
         append_turn(SID, state)
         append_turn(SID, state)
-        entry = json.loads(state.read_text().splitlines()[-1])
+        entry = json.loads(state.read_text(encoding="utf-8").splitlines()[-1])
         assert entry["n"] == 2
 
 
@@ -144,14 +152,16 @@ class TestCountTurns:
             + json.dumps({"session_id": SID, "slug": "__index__"})
             + "\n"
             + json.dumps({"session_id": OTHER_SID, "slug": "__turn__"})
-            + "\n"
+            + "\n",
+            encoding="utf-8",
         )
         assert count_turns(SID, state) == 2
 
     def test_skips_malformed_lines(self, tmp_path):
         state = tmp_path / "state"
         state.write_text(
-            "bad-json\n" + json.dumps({"session_id": SID, "slug": "__turn__"}) + "\n"
+            "bad-json\n" + json.dumps({"session_id": SID, "slug": "__turn__"}) + "\n",
+            encoding="utf-8",
         )
         assert count_turns(SID, state) == 1
 
@@ -165,7 +175,7 @@ class TestCountTurns:
             append_turn(SID, state)
         assert count_turns(SID, state) == 600
         # The on-disk file is still capped, but the counter is not.
-        assert len(state.read_text().splitlines()) == 500
+        assert len(state.read_text(encoding="utf-8").splitlines()) == 500
 
 
 # ---------------------------------------------------------------------------

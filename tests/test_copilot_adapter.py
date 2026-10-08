@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from kb_recall.adapters.copilot import hook as copilot_hook
+from tests.conftest import fake_home
 
 REPO_ROOT = Path(__file__).parent.parent
 HOOK_MODULE = "kb_recall.adapters.copilot.hook"
@@ -44,7 +45,8 @@ def _write_features_md(kb_root: Path) -> None:
         "# Feature Knowledge Base Index\n\n"
         "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
         "|---|---|---|---|---|---|\n"
-        f"| Demo | {SLUG} |  | {BRANCH} | A demo feature | 2026-01-01 |\n"
+        f"| Demo | {SLUG} |  | {BRANCH} | A demo feature | 2026-01-01 |\n",
+        encoding="utf-8",
     )
 
 
@@ -62,7 +64,8 @@ def _write_kb(
             "# Demo — Knowledge Base\n\n"
             "<overview>\nA demo feature.\n</overview>\n\n"
             f"<architecture>\n{readme_body}</architecture>\n"
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -79,7 +82,9 @@ def _make_env(tmp_path: Path, branch: str = BRANCH, with_kb: bool = True) -> dic
 
     kb_root = tmp_path / ".recall-mcp"
     kb_root.mkdir()
-    (kb_root / "config.json").write_text(json.dumps({"projects": [str(project)]}))
+    (kb_root / "config.json").write_text(
+        json.dumps({"projects": [str(project)]}), encoding="utf-8"
+    )
     _write_features_md(kb_root)
     if with_kb:
         _write_kb(kb_root)
@@ -96,10 +101,10 @@ def run_hook(env, event="sessionStart", payload=None, raw=None, cwd=None):
         [sys.executable, "-m", HOOK_MODULE, event],
         input=stdin,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         env={
             **os.environ,
-            "HOME": str(env["home"]),
+            **fake_home(env["home"]),
             "PYTHONPATH": str(REPO_ROOT),
         },
         cwd=str(cwd or env["project"]),
@@ -128,7 +133,7 @@ def seed_tool_calls(env, sid: str, n: int) -> None:
     clock. The counter's on-disk shape is Claude's `__turn__` entry — the helper
     functions are reused verbatim, only the unit they count differs.
     """
-    with copilot_state_path(env).open("a") as f:
+    with copilot_state_path(env).open("a", encoding="utf-8") as f:
         for _ in range(n):
             f.write(json.dumps({"session_id": sid, "slug": "__turn__"}) + "\n")
 
@@ -265,7 +270,8 @@ class TestSessionStart:
             "# Feature Knowledge Base Index\n\n"
             "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
             "|---|---|---|---|---|---|\n"
-            f"| Demo | {SLUG} |  | {branch} | A demo feature | 2026-01-01 |\n"
+            f"| Demo | {SLUG} |  | {branch} | A demo feature | 2026-01-01 |\n",
+            encoding="utf-8",
         )
         result = run_hook(env)
 
@@ -360,7 +366,8 @@ class TestPostToolUse:
             "# Feature Knowledge Base Index\n\n"
             "| Feature | Slug | Ticket(s) | Branch(es) | Summary | Last Updated |\n"
             "|---|---|---|---|---|---|\n"
-            f"| Demo | {SLUG} |  | {branch} | A demo feature | 2026-01-01 |\n"
+            f"| Demo | {SLUG} |  | {branch} | A demo feature | 2026-01-01 |\n",
+            encoding="utf-8",
         )
         seed_tool_calls(env, SID, copilot_hook.MISS_REMINDER_EVERY_TOOL_CALLS - 1)
 

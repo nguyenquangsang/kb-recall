@@ -49,12 +49,12 @@ class TestLoadUsageFile:
 
     def test_reads_records_in_order(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n{"tool": "b"}\n')
+        log.write_text('{"tool": "a"}\n{"tool": "b"}\n', encoding="utf-8")
         assert called_tools(load_usage_file(log)) == ["a", "b"]
 
     def test_skips_blank_and_malformed_lines(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n\nnot json\n{"tool": "b"}\n')
+        log.write_text('{"tool": "a"}\n\nnot json\n{"tool": "b"}\n', encoding="utf-8")
         assert called_tools(load_usage_file(log)) == ["a", "b"]
 
     def test_missing_file_is_empty_not_an_error(self, tmp_path):
@@ -63,7 +63,7 @@ class TestLoadUsageFile:
     def test_accepts_a_string_path(self, tmp_path):
         """argparse hands over str, not Path — that mismatch was a real bug."""
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n')
+        log.write_text('{"tool": "a"}\n', encoding="utf-8")
         assert called_tools(load_usage_file(str(log))) == ["a"]
 
 
@@ -78,31 +78,31 @@ class TestUsageOffset:
 
     def test_offset_is_the_current_end(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n')
+        log.write_text('{"tool": "a"}\n', encoding="utf-8")
         assert usage_offset(log) == log.stat().st_size
 
     def test_records_since_returns_only_the_new_tail(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "old"}\n')
+        log.write_text('{"tool": "old"}\n', encoding="utf-8")
         offset = usage_offset(log)
-        with log.open("a") as handle:
+        with log.open("a", encoding="utf-8") as handle:
             handle.write('{"tool": "new"}\n')
         assert called_tools(records_since(log, offset)) == ["new"]
 
     def test_records_since_zero_reads_everything(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n{"tool": "b"}\n')
+        log.write_text('{"tool": "a"}\n{"tool": "b"}\n', encoding="utf-8")
         assert called_tools(records_since(log, 0)) == ["a", "b"]
 
     def test_nothing_appended_yields_nothing(self, tmp_path):
         log = tmp_path / "usage.jsonl"
-        log.write_text('{"tool": "a"}\n')
+        log.write_text('{"tool": "a"}\n', encoding="utf-8")
         assert records_since(log, usage_offset(log)) == []
 
     def test_malformed_tail_lines_are_skipped(self, tmp_path):
         log = tmp_path / "usage.jsonl"
         offset = usage_offset(log)
-        with log.open("a") as handle:
+        with log.open("a", encoding="utf-8") as handle:
             handle.write('{"tool": "a"}\n\nnot json\n')
         assert called_tools(records_since(log, offset)) == ["a"]
 

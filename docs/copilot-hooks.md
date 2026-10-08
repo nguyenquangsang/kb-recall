@@ -55,7 +55,7 @@ Three separate ceilings stack up, and only the first is documented here rather t
 | --------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | `additionalContext` per injection | ~10 KB (kb-recall uses `COPILOT_CONTEXT_CAP_CHARS`, truncating at a section boundary) | Context is cut; kb-recall appends a line telling the agent to call `load_feature_context`               |
 | Tool-result size                  | ~20 KiB                                                                               | The harness writes the result to a temp file instead of returning it inline, costing an extra read turn |
-| MCP server render ceiling         | `KB_CONTEXT_HARD_LIMIT_CHARS` = 40 KB                                                 | Server-side gate, not a Copilot limit                                                                   |
+| MCP server render ceiling         | `KB_FULL_RENDER_LIMIT_CHARS` = 45 KB                                                  | Server-side gate, not a Copilot limit                                                                   |
 
 A KB larger than 10 KB is therefore **never** fully auto-loaded, and one approaching 20 KiB also spills on explicit loads. The only lever that fixes both is KB size — see the `/recall-compact` and `/recall-tidy` skills.
 

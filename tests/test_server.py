@@ -16,9 +16,9 @@ def make_feature(kb_root, project_name, slug, readme="", memories=None):
     """Create KB_ROOT/<project_name>/<slug>/ with a README.md and memories files."""
     d = kb_root / project_name / slug
     d.mkdir(parents=True)
-    (d / "README.md").write_text(readme)
+    (d / "README.md").write_text(readme, encoding="utf-8")
     for username, content in (memories or {}).items():
-        (d / f"memories-{username}.md").write_text(content)
+        (d / f"memories-{username}.md").write_text(content, encoding="utf-8")
     return d
 
 
@@ -50,7 +50,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[gotcha] old**\n\n"
-            "- **2026-06-01** [id:bbbb]: **[gotcha] new**\n"
+            "- **2026-06-01** [id:bbbb]: **[gotcha] new**\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert merged.index("new") < merged.index("old")
@@ -60,7 +61,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[gotcha] original**\n\n"
-            "- **2026-02-01** [id:bbbb]: [gotcha][supersedes:aaaa] replacement\n"
+            "- **2026-02-01** [id:bbbb]: [gotcha][supersedes:aaaa] replacement\n",
+            encoding="utf-8",
         )
         merged, _ = server._merge_memories([f])
         assert "original" not in merged
@@ -70,7 +72,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[bug] the bug**\n\n"
-            "- **2026-02-01** [id:bbbb]: [resolved:aaaa] fixed now\n"
+            "- **2026-02-01** [id:bbbb]: [resolved:aaaa] fixed now\n",
+            encoding="utf-8",
         )
         merged, _ = server._merge_memories([f])
         assert "the bug" not in merged
@@ -80,7 +83,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[gotcha] has date**\n\n"
-            "- **[gotcha] no date, hand-edited**\n"
+            "- **[gotcha] no date, hand-edited**\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert malformed == 1
@@ -102,7 +106,8 @@ class TestMergeMemories:
             "What: the body survives.\n"
             "Why: blank lines are not delimiters.\n"
             "\n"
-            "- **2026-02-01** [id:bbbb]: **[gotcha] second**\n"
+            "- **2026-02-01** [id:bbbb]: **[gotcha] second**\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert malformed == 0
@@ -127,7 +132,8 @@ class TestMergeMemories:
             "\n"
             "What: original body, must stay hidden.\n"
             "\n"
-            "- **2026-02-01** [id:bbbb]: [gotcha][supersedes:aaaa] replacement\n"
+            "- **2026-02-01** [id:bbbb]: [gotcha][supersedes:aaaa] replacement\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert malformed == 0
@@ -146,7 +152,8 @@ class TestMergeMemories:
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[gotcha] entry**\n"
             "Apply: keep this line\n"
-            "- **Important:** a body bullet\n"
+            "- **Important:** a body bullet\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert malformed == 1
@@ -162,7 +169,8 @@ class TestMergeMemories:
             "\n"
             "---\n"
             "\n"
-            "- **2026-01-01** [id:aaaa]: **[gotcha] first**\n"
+            "- **2026-01-01** [id:aaaa]: **[gotcha] first**\n",
+            encoding="utf-8",
         )
         merged, malformed = server._merge_memories([f])
         assert malformed == 0
@@ -171,9 +179,13 @@ class TestMergeMemories:
 
     def test_merges_across_multiple_files(self, tmp_path):
         f1 = tmp_path / "memories-a.md"
-        f1.write_text("- **2026-01-01** [id:aaaa]: **[gotcha] from a**\n")
+        f1.write_text(
+            "- **2026-01-01** [id:aaaa]: **[gotcha] from a**\n", encoding="utf-8"
+        )
         f2 = tmp_path / "memories-b.md"
-        f2.write_text("- **2026-02-01** [id:bbbb]: **[gotcha] from b**\n")
+        f2.write_text(
+            "- **2026-02-01** [id:bbbb]: **[gotcha] from b**\n", encoding="utf-8"
+        )
         merged, _ = server._merge_memories([f1, f2])
         assert "from a" in merged and "from b" in merged
 
@@ -182,7 +194,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:aaaa]: **[gotcha] original**\n\n"
-            "- **2026-02-01** [id:a1b2c3]: [gotcha][supersedes:aaaa] replacement\n"
+            "- **2026-02-01** [id:a1b2c3]: [gotcha][supersedes:aaaa] replacement\n",
+            encoding="utf-8",
         )
         merged, _ = server._merge_memories([f])
         assert "original" not in merged
@@ -192,7 +205,8 @@ class TestMergeMemories:
         f = tmp_path / "memories-a.md"
         f.write_text(
             "- **2026-01-01** [id:a1b2c3]: **[gotcha] original**\n\n"
-            "- **2026-02-01** [id:d4e5f6]: [gotcha][supersedes:a1b2c3] replacement\n"
+            "- **2026-02-01** [id:d4e5f6]: [gotcha][supersedes:a1b2c3] replacement\n",
+            encoding="utf-8",
         )
         merged, _ = server._merge_memories([f])
         assert "original" not in merged
@@ -394,7 +408,7 @@ class TestUnverifiedKeyFiles:
     def test_missing_path_flagged_existing_path_not(self, tmp_path):
         proj_root = tmp_path / "myproj"
         proj_root.mkdir()
-        (proj_root / "real.py").write_text("x")
+        (proj_root / "real.py").write_text("x", encoding="utf-8")
         result = server._unverified_key_files(["real.py", "missing.py"], [proj_root])
         assert result == {"missing.py"}
 
@@ -633,7 +647,8 @@ class TestSaveBlockedAtHardLimit:
         )
         # Pre-existing entry the closure will hide.
         (d / "memories-alice.md").write_text(
-            "- **2026-01-01** [id:aaaa]: **[gotcha] " + "z" * 500 + "**\n"
+            "- **2026-01-01** [id:aaaa]: **[gotcha] " + "z" * 500 + "**\n",
+            encoding="utf-8",
         )
         result = server.save_memory(
             slug="my-feature",
@@ -807,7 +822,7 @@ class TestS1Promotion:
         return "aaa111"
 
     def section(self, d, name="critical_warnings"):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split(f"<{name}>")[1].split(f"</{name}>")[0]
 
     def test_promotable_tag_is_promoted_with_a_provenance_marker(
@@ -851,13 +866,13 @@ class TestS1Promotion:
 
     def test_non_promotable_tag_leaves_readme_untouched(self, kb_env, fixed_id):
         d = make_feature(kb_env, "myproj", "my-feature", readme=self.README)
-        before = (d / "README.md").read_text()
+        before = (d / "README.md").read_text(encoding="utf-8")
         result = server.save_memory(
             slug="my-feature",
             content="**[idea] maybe try X**\nWhat: w",
             project="myproj",
         )
-        assert (d / "README.md").read_text() == before
+        assert (d / "README.md").read_text(encoding="utf-8") == before
         assert "Promoted to <critical_warnings>" not in result
 
     def test_promoted_title_drops_the_closure_ref(self, kb_env, fixed_id):
@@ -1030,7 +1045,9 @@ class TestS1Promotion:
         assert "saved entry" in result  # the save is the primary act
         assert (d / "memories-alice.md").exists()
         assert "Promotion to <critical_warnings> failed" in result  # but never silent
-        assert "still worth keeping" in (d / "memories-alice.md").read_text()
+        assert "still worth keeping" in (d / "memories-alice.md").read_text(
+            encoding="utf-8"
+        )
 
     def test_missing_section_is_auto_created(self, kb_env, fixed_id):
         """A missing section is created on the fly rather than skipped, so the
@@ -1044,7 +1061,7 @@ class TestS1Promotion:
             project="myproj",
         )
         assert "Promotion skipped:" not in result
-        assert "<critical_warnings>" in (d / "README.md").read_text()
+        assert "<critical_warnings>" in (d / "README.md").read_text(encoding="utf-8")
         assert "no section for this" in self.section(d)
 
     def test_append_is_refused_when_it_would_break_the_growth_ceiling(
@@ -1065,7 +1082,7 @@ class TestS1Promotion:
         )
         assert "Promotion skipped" in note
         assert "/recall:tidy" in note
-        assert "from:abc123" not in (d / "README.md").read_text()
+        assert "from:abc123" not in (d / "README.md").read_text(encoding="utf-8")
 
     def test_replacement_is_not_size_guarded(self, kb_env, monkeypatch):
         """Only appends grow. A replace shrinks or holds, so the ceiling
@@ -1102,7 +1119,7 @@ class TestS4Dedup:
         return "aaa111"
 
     def section(self, d, name="critical_warnings"):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split(f"<{name}>")[1].split(f"</{name}>")[0]
 
     def test_near_duplicate_skips_promotion_but_keeps_the_save(
@@ -1133,7 +1150,7 @@ class TestS4Dedup:
         assert "near-duplicate" in result
         assert body.count("**[gotcha] pooled conns are per-process**") == 1
         # The save is the primary act — the memory still landed.
-        assert (d / "memories-alice.md").read_text().count("[id:") == 1
+        assert (d / "memories-alice.md").read_text(encoding="utf-8").count("[id:") == 1
 
     def test_near_duplicate_save_is_rejected(self, kb_env, monkeypatch):
         # B gate: the second save is near-dup of a LIVE memory entry, so it is
@@ -1160,7 +1177,7 @@ class TestS4Dedup:
         assert "Rejected: near-duplicate" in result
         assert "[id:aaa111]" in result
         # The second save did not land.
-        assert (d / "memories-alice.md").read_text().count("[id:") == 1
+        assert (d / "memories-alice.md").read_text(encoding="utf-8").count("[id:") == 1
 
     def test_distinct_entries_both_promote(self, kb_env, monkeypatch):
         ids = iter(["aaa111", "bbb222"])
@@ -1231,7 +1248,7 @@ class TestPromotedMarkerCarryForward:
     instead of replacing. Markers are matched back by the block's opening line."""
 
     def section(self, d):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split("<critical_warnings>")[1].split("</critical_warnings>")[0]
 
     def test_marker_survives_a_section_rewrite(self, kb_env):
@@ -1309,7 +1326,7 @@ class TestProvenanceRecognition:
         return "aaa111"
 
     def section(self, d, name="critical_warnings"):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split(f"<{name}>")[1].split(f"</{name}>")[0]
 
     def test_a_markerless_orphan_is_adopted(self, kb_env, fixed_id):
@@ -1401,9 +1418,8 @@ class TestProvenanceRecognition:
             project="myproj",
             confirm=True,
         )
-        overview = (
-            (d / "README.md").read_text().split("<overview>")[1].split("</overview>")[0]
-        )
+        readme = (d / "README.md").read_text(encoding="utf-8")
+        overview = readme.split("<overview>")[1].split("</overview>")[0]
         assert "from:" not in overview
 
     def test_a_duplicate_block_is_surfaced_not_double_marked(self):
@@ -1476,7 +1492,7 @@ class TestPromotedMarkerDate:
         return "aaa111"
 
     def section(self, d, name="critical_warnings"):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split(f"<{name}>")[1].split(f"</{name}>")[0]
 
     def _readme_with(self, marker):
@@ -1591,7 +1607,9 @@ class TestPromotedMarkerDate:
         server.save_memory(slug="my-feature", content=self.BODY, project="myproj")
 
         assert self.section(d).strip().endswith("<!-- from:aaa111 2026-01-01 -->")
-        assert "- **2026-01-01** [id:aaa111]" in (d / "memories-alice.md").read_text()
+        assert "- **2026-01-01** [id:aaa111]" in (d / "memories-alice.md").read_text(
+            encoding="utf-8"
+        )
 
     def test_capture_uses_the_entrys_own_date_not_the_readme_marker_date(
         self, kb_env, fixed_id
@@ -1640,7 +1658,7 @@ class TestPreviewShowsTheWrittenContent:
     )
 
     def section(self, d):
-        text = (d / "README.md").read_text()
+        text = (d / "README.md").read_text(encoding="utf-8")
         return text.split("<critical_warnings>")[1].split("</critical_warnings>")[0]
 
     def test_a_dropped_marker_is_visible_in_the_preview(self, kb_env):
@@ -1703,7 +1721,7 @@ class TestPreviewShowsTheWrittenContent:
             project="myproj",
         )
         assert "No changes" in result
-        assert_marker((d / "README.md").read_text(), "aaa111")
+        assert_marker((d / "README.md").read_text(encoding="utf-8"), "aaa111")
 
 
 class TestReadmeWriteSizeGate:
@@ -1729,7 +1747,7 @@ class TestReadmeWriteSizeGate:
         d = make_feature(
             kb_env, "myproj", "my-feature", readme=self.readme_with("seed")
         )
-        before = (d / "README.md").read_text()
+        before = (d / "README.md").read_text(encoding="utf-8")
         result = server.update_readme(
             slug="my-feature",
             section="critical_warnings",
@@ -1739,7 +1757,7 @@ class TestReadmeWriteSizeGate:
         )
         assert "Update blocked" in result
         assert "Nothing was written" in result
-        assert (d / "README.md").read_text() == before
+        assert (d / "README.md").read_text(encoding="utf-8") == before
 
     def test_a_shrinking_write_is_never_blocked(self, kb_env, tight_body_ceiling):
         """The KB is already over the ceiling; only a shrink can fix that, so the
@@ -1760,7 +1778,11 @@ class TestReadmeWriteSizeGate:
         assert "Update blocked" not in result
         # Compare length, not substring: "y"*450 is inside "y"*500, so `in` would
         # pass even if the write never happened.
-        body = (d / "README.md").read_text().split("<critical_warnings>")[1]
+        body = (
+            (d / "README.md")
+            .read_text(encoding="utf-8")
+            .split("<critical_warnings>")[1]
+        )
         assert len(body.split("</critical_warnings>")[0].strip()) == 450
 
     def test_the_preview_warns_before_the_write_refuses(
@@ -1780,7 +1802,7 @@ class TestReadmeWriteSizeGate:
         assert "Diff preview" in preview
         assert "Update blocked" in preview
         assert "nothing written yet" in preview
-        assert (d / "README.md").read_text() == self.readme_with("seed")
+        assert (d / "README.md").read_text(encoding="utf-8") == self.readme_with("seed")
 
 
 class TestCapturedAutoHide:
@@ -1874,7 +1896,7 @@ class TestEntryIdLength:
             content="[gotcha] a sufficiently long test entry",
             project="myproj",
         )
-        text = (d / "memories-alice.md").read_text()
+        text = (d / "memories-alice.md").read_text(encoding="utf-8")
         m = server._entry_id(text.strip().split("\n\n")[-1])
         assert len(m) == 6
 
@@ -1886,7 +1908,7 @@ class TestEntryIdLength:
         server.report_miss(
             slug="my-feature", description="missed this", project="myproj"
         )
-        text = (d / "memories-alice.md").read_text()
+        text = (d / "memories-alice.md").read_text(encoding="utf-8")
         m = server._entry_id(text.strip().split("\n\n")[-1])
         assert len(m) == 6
 
@@ -1963,12 +1985,18 @@ class TestInitFeature:
         (templates_dir / "feature-README.md").write_text(
             "# $name\n<key_files>\n"
             "<!-- e.g. `{project-name}/{slug}/README.md`, or $unknown_var -->\n"
-            "</key_files>\n"
+            "</key_files>\n",
+            encoding="utf-8",
         )
-        (templates_dir / "feature-memories.md").write_text("# $name\n")
-        (templates_dir / "features-index.md").write_text("$first_row\n")
+        (templates_dir / "feature-memories.md").write_text(
+            "# $name\n", encoding="utf-8"
+        )
+        (templates_dir / "features-index.md").write_text(
+            "$first_row\n", encoding="utf-8"
+        )
         (templates_dir / "claude-md-snippet.md").write_text(
-            "recall-mcp setup snippet\n"
+            "recall-mcp setup snippet\n",
+            encoding="utf-8",
         )
         monkeypatch.setattr(server, "TEMPLATES_DIR", templates_dir)
         monkeypatch.setattr(server, "_resolve_username", lambda confirmed="": "alice")
@@ -1980,7 +2008,9 @@ class TestInitFeature:
             project="myproj",
         )
         assert "Created feature KB" in result
-        readme = (kb_env / "myproj" / "my-feature" / "README.md").read_text()
+        readme = (kb_env / "myproj" / "my-feature" / "README.md").read_text(
+            encoding="utf-8"
+        )
         # untouched -- not mistaken for a real placeholder, even though it
         # contains the literal word "slug" inside curly braces
         assert "{project-name}/{slug}/README.md" in readme
@@ -2006,6 +2036,30 @@ class TestLoadFeatureContext:
         assert "Does a thing." in result
         assert "insight" in result
         assert "Feature context: myproj/my-feature" in result
+
+    def test_sections_filter_header_reflects_rendered_size(self, kb_env):
+        # A sections allow-list drops the memories block entirely, so the header's
+        # token estimate must reflect that. The pre-filter counts reported the
+        # full README + memories (~12 tokens here) even though memories were not
+        # rendered, over-stating the payload by up to ~3x on a real KB.
+        make_feature(
+            kb_env,
+            "myproj",
+            "my-feature",
+            readme=(
+                "<overview>\nA summary.\n</overview>\n\n"
+                "<critical_warnings>\nA warning here.\n</critical_warnings>\n"
+            ),
+            memories={"alice": "- **2026-01-01** [id:aaaa]: **[gotcha] insight**\n"},
+        )
+        result = server.load_feature_context(
+            slug="my-feature", project="myproj", sections=["critical_warnings"]
+        )
+        header = result.splitlines()[0]
+        assert "memories ~0" in header
+        assert "A warning here." in result
+        assert "A summary." not in result  # overview excluded by the allow-list
+        assert "insight" not in result  # memories dropped under sections filter
 
     def test_not_found_returns_message(self, kb_env):
         result = server.load_feature_context(slug="does-not-exist", project="myproj")
@@ -2101,7 +2155,9 @@ class TestLoadFeatureContext:
         server.load_feature_context(slug="my-feature", project="myproj")
         entries = [
             json.loads(line)
-            for line in (kb_env / "usage.jsonl").read_text().splitlines()
+            for line in (kb_env / "usage.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
         ]
         last = entries[-1]
         assert last["tool"] == "load_feature_context"
@@ -2213,7 +2269,8 @@ class TestBudgetedRender:
     def test_sections_allow_list_renders_only_those_and_omits_memories(self, kb_env):
         d = self._kb(kb_env, cw="- only me", arch="arch text")
         (d / "memories-alice.md").write_text(
-            "- **2026-01-01** [id:aaaa]: **[gotcha] uniquememorytoken**\n"
+            "- **2026-01-01** [id:aaaa]: **[gotcha] uniquememorytoken**\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", sections=["critical_warnings"]
@@ -2229,7 +2286,8 @@ class TestBudgetedRender:
             "".join(
                 f"- **2026-01-{i:02d}** [id:{i:04x}]: **[gotcha] memory {i}**\n"
                 for i in range(1, 40)
-            )
+            ),
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=2500
@@ -2253,7 +2311,8 @@ class TestBudgetedRender:
             "".join(
                 f"- **2026-01-{i:02d}** [id:{i:04x}]: **[gotcha] memory token {i}**\n"
                 for i in range(1, 31)
-            )
+            ),
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=2500
@@ -2280,7 +2339,8 @@ class TestBudgetedRender:
             "- **2026-01-01** [id:aaaa]: **[pattern] a title-only pattern**\n"
             "What: the full pattern body, only reachable via expand_ids.\n"
             "Why: it is a pattern, kept title-only by default.\n"
-            "Apply: fetch it when the title looks relevant.\n"
+            "Apply: fetch it when the title looks relevant.\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=100, expand_ids=["aaaa"]
@@ -2298,7 +2358,8 @@ class TestBudgetedRender:
             "- **2026-01-01** [id:aaaa]: **[gotcha] an old gating memory**\n"
             "What: a requested body that must survive.\n"
             "Why: caller asked for it by id.\n"
-            "Apply: show it.\n"
+            "Apply: show it.\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=500, expand_ids=["aaaa"]
@@ -2319,7 +2380,8 @@ class TestBudgetedRender:
                 f"- **2026-01-{i:02d}** [id:{i:04x}]: **[gotcha] invariant {i}**\n"
                 f"What: body for invariant {i}, " + "x" * 2000 + "\n"
                 for i in range(1, 30)
-            )
+            ),
+            encoding="utf-8",
         )
         result = server.load_feature_context(slug="my-feature", project="myproj")
 
@@ -2340,7 +2402,8 @@ class TestBudgetedRender:
             "- **2026-01-01** [id:aaaa]: **[gotcha] a small insight**\n"
             "What: the full body stays visible.\n"
             "Why: the KB is small.\n"
-            "Apply: keep eager.\n"
+            "Apply: keep eager.\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(slug="my-feature", project="myproj")
         assert "the full body stays visible" in result
@@ -2355,7 +2418,8 @@ class TestBudgetedRender:
                 f"- **2026-01-{i:02d}** [id:{i:04x}]: **[gotcha] invariant {i}**\n"
                 f"What: body for invariant {i}, " + "x" * 300 + "\n"
                 for i in range(1, 15)
-            )
+            ),
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=1500
@@ -2376,7 +2440,8 @@ class TestBudgetedRender:
                 f"**[gotcha] a long descriptive title number {i} that eats budget**\n"
                 f"What: body " + "x" * 500 + "\n"
                 for i in range(1, 40)
-            )
+            ),
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=4000
@@ -2515,7 +2580,8 @@ class TestLoadArgTypeGuards:
             "- **2026-01-01** [id:aaaa]: **[pattern] a title-only pattern**\n"
             "What: the body that must actually be fetched.\n"
             "Why: it is a pattern, kept title-only by default.\n"
-            "Apply: fetch it when the title looks relevant.\n"
+            "Apply: fetch it when the title looks relevant.\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=100, expand_ids="aaaa"
@@ -2534,7 +2600,8 @@ class TestLoadArgTypeGuards:
         d = self._kb(kb_env)
         (d / "memories-alice.md").write_text(
             "- **2026-01-01** [id:aaaa]: **[pattern] a title-only pattern**\n"
-            "What: a body.\nWhy: x.\nApply: y.\n"
+            "What: a body.\nWhy: x.\nApply: y.\n",
+            encoding="utf-8",
         )
         result = server.load_feature_context(
             slug="my-feature", project="myproj", max_chars=100, expand_ids="zzzzzz"
@@ -2655,7 +2722,7 @@ class TestReportMissGrowthGate:
         assert "growth ceiling" in result
         assert "NOT written" in result
         # Refused before the write — the MISS never reached the file.
-        assert "zzz" not in (d / "memories-alice.md").read_text()
+        assert "zzz" not in (d / "memories-alice.md").read_text(encoding="utf-8")
 
     def test_miss_allowed_under_ceiling(self, kb_env, monkeypatch):
         monkeypatch.setattr(server, "_resolve_username", lambda confirmed="": "alice")
@@ -2742,6 +2809,33 @@ class TestSearchFeatures:
         assert "aaa-slug" not in result
         assert "truncated at 1 of 2" in result
 
+    def test_no_single_slug_crowds_out_others_on_truncation(self, kb_env, monkeypatch):
+        # One slug with many matching lines must not crowd a second slug out of
+        # the MAX_SEARCH_RESULTS window — round-robin interleaving gives every
+        # matching slug a turn instead of dumping one slug's hits contiguously.
+        make_feature(
+            kb_env,
+            "myproj",
+            "flood-slug",
+            readme="<overview>\n"
+            "alpha line one\n"
+            "alpha line two\n"
+            "alpha line three\n"
+            "alpha line four\n"
+            "alpha line five\n"
+            "</overview>",
+        )
+        make_feature(
+            kb_env,
+            "myproj",
+            "needle-slug",
+            readme="<overview>\nbeta line only.\n</overview>",
+        )
+        monkeypatch.setattr(server, "MAX_SEARCH_RESULTS", 3)
+        result = server.search_features(query="alpha beta", project="myproj")
+        assert "needle-slug" in result
+        assert "flood-slug" in result
+
     def test_hit_annotated_with_matched_keyword_count(self, kb_env):
         make_feature(
             kb_env,
@@ -2758,6 +2852,57 @@ class TestSearchFeatures:
         result = server.search_features(query="alpha beta", project="myproj")
         assert "(1/2 kw)" in result  # partial-slug: only "alpha"
         assert "(2/2 kw)" in result  # full-slug: both keywords
+
+    def test_memory_entry_is_one_hit_with_id_not_split(self, kb_env):
+        # A multi-paragraph entry (title / What / Why / Apply separated by blank
+        # lines) must stay ONE hit carrying its id. The old re.split on blank
+        # lines turned each paragraph into its own hit and lost the id on every
+        # paragraph after the header (label became "[memory]"), so a reader could
+        # act on a "Why:" line without ever seeing the entry it belonged to.
+        make_feature(
+            kb_env,
+            "myproj",
+            "my-feature",
+            memories={
+                "alice": (
+                    "- **2026-01-01** [id:aaaa]: **[gotcha] myuniquekeyword**\n\n"
+                    "What: the myuniquekeyword fact.\n\n"
+                    "Why: because myuniquekeyword.\n\n"
+                    "Apply: use myuniquekeyword.\n"
+                )
+            },
+        )
+        result = server.search_features(query="myuniquekeyword", project="myproj")
+        assert "[id:aaaa]" in result
+        assert "[memory]" not in result
+
+    def test_memory_hit_shows_full_self_contained_body(self, kb_env):
+        # A memory hit must show the whole entry (What/Why/Apply/Verify), not a
+        # windowed snippet — memory entries are self-contained answers, unlike
+        # README section lines which are pointers. The footer states which is
+        # which.
+        make_feature(
+            kb_env,
+            "myproj",
+            "my-feature",
+            memories={
+                "alice": (
+                    "- **2026-01-01** [id:aaaa]: **[gotcha] myuniquekeyword**\n\n"
+                    "What: the myuniquekeyword fact.\n\n"
+                    "Why: because myuniquekeyword.\n\n"
+                    "Apply: use myuniquekeyword.\n\n"
+                    "Verify: grep myuniquekeyword\n"
+                )
+            },
+        )
+        result = server.search_features(query="myuniquekeyword", project="myproj")
+        # full body present, not a windowed snippet
+        assert "the myuniquekeyword fact." in result
+        assert "because myuniquekeyword." in result
+        assert "Verify: grep myuniquekeyword" in result
+        # footer contract distinguishes the two hit kinds
+        assert "Memory hits" in result
+        assert "README hits" in result
 
 
 # ---------------------------------------------------------------------------
@@ -2779,7 +2924,9 @@ def _write_features_md(kb_root, project_name, rows):
         "|---|---|---|---|---|---|\n"
     )
     body = "\n".join("| " + " | ".join(r) + " |" for r in rows)
-    (kb_root / project_name / "features.md").write_text(header + body + "\n")
+    (kb_root / project_name / "features.md").write_text(
+        header + body + "\n", encoding="utf-8"
+    )
 
 
 class TestUpdateFeatureIndex:
@@ -2820,7 +2967,7 @@ class TestUpdateFeatureIndex:
             ],
         )
         monkeypatch.setattr(server, "date", _FixedDate)
-        before = (kb_env / "myproj" / "features.md").read_text()
+        before = (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
 
         result = server.update_feature_index(
             slug="payment-gateway", field="branch", value="feat/v2", project="myproj"
@@ -2828,7 +2975,7 @@ class TestUpdateFeatureIndex:
 
         assert "Diff preview" in result
         assert "confirm=True" in result
-        assert (kb_env / "myproj" / "features.md").read_text() == before
+        assert (kb_env / "myproj" / "features.md").read_text(encoding="utf-8") == before
 
     def test_confirm_true_replaces_field_and_bumps_date(self, kb_env, monkeypatch):
         make_feature(kb_env, "myproj", "payment-gateway")
@@ -2857,7 +3004,7 @@ class TestUpdateFeatureIndex:
         )
 
         assert "Updated features.md index row" in result
-        text = (kb_env / "myproj" / "features.md").read_text()
+        text = (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
         assert (
             "| Payment Gateway | payment-gateway |  | feat/v2 | old summary | 2026-01-15 |"
             in text
@@ -2892,7 +3039,7 @@ class TestUpdateFeatureIndex:
         )
 
         assert "Updated features.md index row" in result
-        text = (kb_env / "myproj" / "features.md").read_text()
+        text = (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
         assert "feat/v1, feat/v2" in text
 
     def test_no_changes_when_value_and_date_both_already_current(
@@ -2956,7 +3103,7 @@ class TestUpdateFeatureIndex:
         )
 
         assert "Updated features.md index row" in result
-        text = (kb_env / "myproj" / "features.md").read_text()
+        text = (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
         assert "2026-01-15" in text
         assert "2026-01-01" not in text
 
@@ -2987,7 +3134,7 @@ class TestUpdateFeatureIndex:
         )
 
         assert "Updated features.md index row" in result
-        text = (kb_env / "myproj" / "features.md").read_text()
+        text = (kb_env / "myproj" / "features.md").read_text(encoding="utf-8")
         assert "old summary" not in text
         assert "new summary" in text
         assert "feat/v1" in text  # branch untouched
@@ -3004,7 +3151,9 @@ class TestLogStatus:
     effectiveness metric counted correct rejections as failures."""
 
     def _last_record(self, kb_env):
-        lines = (kb_env / "usage.jsonl").read_text().strip().splitlines()
+        lines = (
+            (kb_env / "usage.jsonl").read_text(encoding="utf-8").strip().splitlines()
+        )
         return json.loads(lines[-1])
 
     def test_guard_rejection_logs_rejected_with_reason(self, kb_env):
@@ -3081,11 +3230,11 @@ class TestAtomicWrite:
     def test_writes_content_and_leaves_no_temp_file(self, tmp_path):
         target = tmp_path / "file.md"
         server._atomic_write(target, "hello\nworld\n")
-        assert target.read_text() == "hello\nworld\n"
+        assert target.read_text(encoding="utf-8") == "hello\nworld\n"
         assert list(tmp_path.glob("*.tmp-*")) == []
 
     def test_overwrites_an_existing_file(self, tmp_path):
         target = tmp_path / "file.md"
-        target.write_text("old")
+        target.write_text("old", encoding="utf-8")
         server._atomic_write(target, "new")
-        assert target.read_text() == "new"
+        assert target.read_text(encoding="utf-8") == "new"
