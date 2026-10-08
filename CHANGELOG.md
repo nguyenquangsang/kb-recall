@@ -6,6 +6,54 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The distribution name is `kb-recall`, the command is `recall`.
 
+## [0.2.1] — 2026-10-08
+
+### Added
+
+- **A `windows` CI job** (windows-latest, Python 3.12, pytest only). A Windows runner
+  pipes cp1252 for real, which is the exact condition that crashed `recall setup` — the
+  bug below had never had a platform able to reproduce it. Lint and type checking are
+  deliberately absent from it: ruff is platform-independent, so the ubuntu job already
+  covers it, and mypy resolves its stubs *per platform*, so on Windows it would report
+  on typeshed's Windows views of stdlib calls this package only ever makes on POSIX.
+- **A non-UTF-8 locale lane** (`PYTHONUTF8=0 LC_ALL=C`) on the existing ubuntu matrix.
+  US-ASCII is stricter than cp1252 — which leaves only five bytes undefined — so it
+  reproduces the same class deterministically on a runner already being paid for.
+  Measured across the sweep: 123 failed + 16 errors before, 458 passed after.
+- `tests/test_encoding.py` — AST-walks `kb_recall/`, `tests/` and `scripts/` so a newly
+  added bare `read_text()` / `write_text()` / `open()` fails the suite, and exercises the
+  stdio guard in a child process forced to a non-UTF-8 locale.
+
+### Fixed
+
+- **`recall setup` crashed on Windows.** It read its own packaged template with a bare
+  `Path.read_text()`, which does not mean UTF-8 — it means "whatever this machine uses".
+  On Windows that is cp1252, and `⚠️` contains byte `0x8F`, one of the five bytes cp1252
+  leaves undefined, so setup died with `UnicodeDecodeError` before writing anything. The
+  same assumption stood at 247 text-stream sites across 20 files, in both directions:
+  hooks print KB text carrying `—` / `→` / `✓` / `⚠`, and because hooks swallow every
+  exception by design, an encode error there surfaced as an *empty* injection rather than
+  an error. `kb_recall/stdio.py::force_utf8_stdio()` now reconfigures stdin/stdout/stderr
+  to UTF-8 and is called first thing by all three entry points (`cli.main`,
+  `hooks/prompt_submit.main`, `adapters/copilot/hook.main`), and `encoding="utf-8"` is
+  named at every stream site.
+- **`search_features` could fill all 20 result slots from one feature.** Hits were
+  flattened contiguously per slug, so a single high-matching feature could crowd out the
+  KB that actually held the answer. Hits are now emitted round-robin across ranked slugs;
+  each slug's own relevance order still decides its first hit.
+- **Subprocess fixtures isolated `HOME` but not `USERPROFILE`,** so on Windows a test
+  that believed it was sandboxed read — and could write — the runner's real profile.
+  `Path.home()` goes through `ntpath.expanduser()`, which reads `USERPROFILE` and never
+  consults `HOME`. Invisible on macOS and Linux, which is why it survived every local run;
+  fixed with `tests/conftest.py::fake_home()` at seven call sites.
+
+### Changed
+
+- **Links in `README.md` are absolute GitHub URLs.** PyPI renders that file as the project
+  description at `https://pypi.org/project/kb-recall/`, where a repo-relative path such as
+  `CHANGELOG.md` resolves against pypi.org and dead-ends — including the Changelog link in
+  the table of contents, which was the one people actually clicked.
+
 ## [0.2.0] — 2026-10-06
 
 ### Added
@@ -80,5 +128,6 @@ The distribution name is `kb-recall`, the command is `recall`.
   `update_feature_index`, `report_miss`), the slash commands, the per-contributor
   journal model, and the idle-gap cost guard.
 
+[0.2.1]: https://github.com/nguyenquangsang/kb-recall/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nguyenquangsang/kb-recall/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nguyenquangsang/kb-recall/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 [project]
 name = "kb-recall"
-version = "0.2.0"
+version = "0.2.1"
 description = "MCP server that gives Claude Code and GitHub Copilot persistent, feature-scoped knowledge across sessions"
 readme = "README.md"
 requires-python = ">=3.10"
