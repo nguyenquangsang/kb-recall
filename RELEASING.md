@@ -60,29 +60,41 @@ a tag ever depends on it.
 
 ### 5. Publish a GitHub Release
 
-Update `version` in `pyproject.toml` and move `CHANGELOG.md`'s Unreleased entries
-under a new heading dated today. Land both on `main` and push **before** you
-release — a tag is only a pointer, and `publish.yml` publishes whatever commit it
-points at.
+Update `version` in `pyproject.toml`, re-lock, and write `CHANGELOG.md`'s entry for
+it under a new heading dated today. Land all three on `main` and push **before**
+you release — a tag is only a pointer, and `publish.yml` publishes whatever commit
+it points at.
 
-Then create the release: **Releases → Draft a new release**. Type `v0.2.0` into
-**Choose a tag** and click **Create new tag**, and check that **Target** reads
-`main`. Publishing the release creates and pushes that tag, and *that* is what
-triggers `.github/workflows/publish.yml`.
+There is no `Unreleased` section to move: this changelog is written at release time,
+so the entry gets composed here from `git log --oneline <last-tag>..main` and the
+diffstat. (Keep-a-Changelog's "move Unreleased entries under a new heading" wording
+assumes a section this repo has never kept.)
+
+```bash
+uv lock    # required: uv.lock pins the project's own version, and ci.yml runs
+           # `uv sync --locked`, which fails the release if the two disagree
+```
+
+Then create the release: **Releases → Draft a new release**. Type the tag matching
+the version you just set (`v0.2.1`) into **Choose a tag** and click **Create new
+tag**, and check that **Target** reads `main`. Publishing the release creates and
+pushes that tag, and *that* is what triggers `.github/workflows/publish.yml`.
 
 ```bash
 git checkout main && git pull
-# bump version in pyproject.toml, date CHANGELOG.md, commit, push
+# bump version in pyproject.toml + uv lock, write the CHANGELOG entry, commit, push
 ```
 
 A bare `git tag v0.2.0 && git push origin v0.2.0` publishes nothing: the workflow
 listens for a published release, not for a tag push. That is deliberate — a tag
 push can point at any commit, including one on an unreviewed branch.
 
-`publish.yml` enforces two things itself, both failing before the build:
+`publish.yml` enforces three things itself, all failing before the build:
 
 - the tag agrees with `version` in `pyproject.toml`, so it never publishes a
   number nobody chose;
+- `uv.lock` agrees with `pyproject.toml`, because `ci.yml` runs `uv sync --locked`
+  — a forgotten `uv lock` stops the release rather than shipping a stale lock;
 - the full test suite passes on the tagged commit, because the publish job
   requires `ci.yml` to succeed first.
 

@@ -1,7 +1,13 @@
 # kb-recall
 
+<!-- Every link in this file is an absolute GitHub URL on purpose. PyPI renders
+     this README as the project description at https://pypi.org/project/kb-recall/,
+     where a repo-relative path like `CHANGELOG.md` resolves against pypi.org and
+     dead-ends. Nothing catches this: the link renders fine on GitHub and the
+     test suite never fetches it. Same reason the images below are raw URLs. -->
+
 [![CI](https://github.com/nguyenquangsang/kb-recall/actions/workflows/ci.yml/badge.svg)](https://github.com/nguyenquangsang/kb-recall/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/nguyenquangsang/kb-recall/blob/main/LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 
 ![Starting a session — the hook reads the branch and loads the matching KB before the first prompt](https://raw.githubusercontent.com/nguyenquangsang/kb-recall/main/images/4-load-kb.gif)
@@ -14,7 +20,7 @@ Persistent memory for Claude Code and GitHub Copilot, scoped to the feature you'
 - [The problem](#the-problem)
 - [What makes this different](#what-makes-this-different)
 - [Installation](#installation)
-- [Changelog](CHANGELOG.md)
+- [Changelog](https://github.com/nguyenquangsang/kb-recall/blob/main/CHANGELOG.md)
 - [Configuration](#configuration)
 - [KB structure](#kb-structure)
 - [How it works](#how-it-works)
@@ -41,7 +47,7 @@ recall setup --platform copilot   # 3b. (optional) Copilot: MCP config + hooks +
 
 Reload your client, then open a session on a feature branch. There is no load command to remember — the session hook reads your branch and loads the matching KB as the session opens. That is the moment in the GIF above. If the branch matches no known KB, your agent offers to create one (`/recall:init`) or link an existing one (`/recall:link-feature`).
 
-Verify the install with `recall --help`. The full walkthrough, with a screenshot per step, is in [GUIDE.md](GUIDE.md). For Copilot, see [GitHub Copilot](#github-copilot).
+Verify the install with `recall --help`. The full walkthrough, with a screenshot per step, is in [GUIDE.md](https://github.com/nguyenquangsang/kb-recall/blob/main/GUIDE.md). For Copilot, see [GitHub Copilot](#github-copilot).
 
 ## The problem
 
@@ -282,7 +288,7 @@ git -C ~/.recall-mcp/<project-name> diff HEAD~1
 
 Claude Code silently truncates a deferred MCP tool's description at roughly 2,000–2,150 characters. The cut is _proportional_, not fixed — a longer docstring loses a larger fraction of itself, not a fixed amount. This is a behavioral measurement taken against a live session, not something the client exposes, so it establishes nothing about why the cut lands there or whether it holds across Claude Code versions.
 
-That finding is why `Args:` sits before `OUTPUT` in every tool on this server, and why `CLAUDE.md` carries a length budget. The two docstrings that produced it were both trimmed afterwards, so the numbers are documented rather than restated here as live figures: [`docs/toolsearch-truncation.md`](docs/toolsearch-truncation.md) carries the measurements, the method, and the transcript route for checking it yourself — `~/.claude/projects/*/*.jsonl` records what the model was actually served, so a rendered description can be compared against the docstring on disk.
+That finding is why `Args:` sits before `OUTPUT` in every tool on this server, and why `CLAUDE.md` carries a length budget. The two docstrings that produced it were both trimmed afterwards, so the numbers are documented rather than restated here as live figures: [`docs/toolsearch-truncation.md`](https://github.com/nguyenquangsang/kb-recall/blob/main/docs/toolsearch-truncation.md) carries the measurements, the method, and the transcript route for checking it yourself — `~/.claude/projects/*/*.jsonl` records what the model was actually served, so a rendered description can be compared against the docstring on disk.
 
 ## Development
 
@@ -296,9 +302,10 @@ Feature KB templates live in `kb_recall/templates/` — edit them to change what
 Tests and lint:
 
 ```bash
-uv run pytest        # 451 tests: hook helpers, CLI, server tools, prompt_submit,
+uv run pytest        # 458 tests: hook helpers, CLI, server tools, prompt_submit,
                      # commands + skills contracts, Copilot adapter, smoke scorer,
-                     # docstring contract, end-to-end lifecycle, stdio smoke
+                     # docstring contract, end-to-end lifecycle, stdio smoke,
+                     # text-encoding guard
 uv run ruff check kb_recall tests scripts
 ```
 
