@@ -162,5 +162,7 @@ def test_copilot_instructions_survive_a_non_utf8_locale(tmp_path):
             "PYTHONPATH": str(REPO_ROOT),
         },
     )
-    written = (project / ".github" / "copilot-instructions.md").read_text(encoding="utf-8")
+    written = (project / ".github" / "copilot-instructions.md").read_text(
+        encoding="utf-8"
+    )
     assert "⚠️ Promotion skipped" in written

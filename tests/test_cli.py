@@ -344,16 +344,22 @@ class TestCmdSetupCopilot:
         monkeypatch.setattr(cli, "COPILOT_SKILLS_DIR", tmp_path / "copilot" / "skills")
         monkeypatch.setattr(cli, "cmd_sync_commands", lambda *_: 0)
         monkeypatch.setattr("builtins.input", lambda *_: "other")
-        monkeypatch.setattr(cli.shutil, "which", lambda name: f"/fake/bin/{name}")
+        # Under tmp_path rather than a literal "/fake/bin": _server_command()
+        # bakes in str(Path(exe).absolute()), and on Windows a POSIX-style root
+        # resolves against the current drive ("/fake/bin/x" -> "C:\fake\bin\x"),
+        # so a hardcoded POSIX literal asserts something the code never returns
+        # there. tmp_path is absolute on every platform, so it round-trips.
+        fake_bin = tmp_path / "fake-bin"
+        monkeypatch.setattr(cli.shutil, "which", lambda name: str(fake_bin / name))
         return project_dir
 
-    def test_writes_the_mcp_config(self, project):
+    def test_writes_the_mcp_config(self, project, tmp_path):
         assert cli.cmd_setup(["--platform", "copilot"]) == 0
 
         mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
         server = mcp_config["mcpServers"]["recall"]
         assert server["type"] == "stdio"
-        assert server["command"] == "/fake/bin/recall-server"
+        assert server["command"] == str(tmp_path / "fake-bin" / "recall-server")
 
     def test_writes_both_hook_events_with_the_event_on_argv(self, project):
         """Both events in one file: the adapter dispatches on argv[1], and the
