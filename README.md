@@ -335,7 +335,7 @@ Feature KB templates live in `kb_recall/templates/` — edit them to change what
 Tests and lint:
 
 ```bash
-uv run pytest        # 460 tests: hook helpers, CLI, server tools, prompt_submit,
+uv run pytest        # 466 tests: hook helpers, CLI, server tools, prompt_submit,
                      # commands + skills contracts, Copilot adapter, smoke scorer,
                      # docstring contract, end-to-end lifecycle, stdio smoke,
                      # text-encoding guard
