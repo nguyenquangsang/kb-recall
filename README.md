@@ -20,6 +20,7 @@ Persistent memory for Claude Code and GitHub Copilot, scoped to the feature you'
 - [The problem](#the-problem)
 - [What makes this different](#what-makes-this-different)
 - [Installation](#installation)
+- [Troubleshooting](#troubleshooting)
 - [Changelog](https://github.com/nguyenquangsang/kb-recall/blob/main/CHANGELOG.md)
 - [Configuration](#configuration)
 - [KB structure](#kb-structure)
@@ -40,10 +41,14 @@ Three commands, one reload, and your agent stops starting from scratch.
 
 ```bash
 uv tool install kb-recall     # 1. install the CLI — isolated env, exposes one `recall` command
-cd ~/your-project             # 2. `recall setup` is per-project — cd into the target first
-recall setup                  # 3. register MCP server + config + CLAUDE.local.md + hook
-recall setup --platform copilot   # 3b. (optional) Copilot: MCP config + hooks + Agent Skills
+cd ~/your-project             # 2. setup is per-project — cd into the target first
+recall setup -p claude        # 3. register MCP server + config + CLAUDE.local.md + hook
+recall setup -p copilot       # 3b. (optional) Copilot: MCP config + hooks + Agent Skills
 ```
+
+`-p` is required: setup writes into one client's configuration, so the command that
+picks which client is never inferred. `-p copilot` writes `.mcp.json` + `.github/`
+and never touches `~/.claude/`; `-p claude` is the mirror image. Run both to serve both.
 
 Reload your client, then open a session on a feature branch. There is no load command to remember — the session hook reads your branch and loads the matching KB as the session opens. That is the moment in the GIF above. If the branch matches no known KB, your agent offers to create one (`/recall:init`) or link an existing one (`/recall:link-feature`).
 
@@ -69,14 +74,16 @@ Most memory layers ask one question: _did it remember?_ This one asks four — _
 
 ## Installation
 
-Requires [uv](https://docs.astral.sh/uv/). Two install sources are available — pick whichever your network allows:
+Requires [uv](https://docs.astral.sh/uv/) — or [pipx](https://pipx.pypa.io/stable/), which works identically. Two install sources are available — pick whichever your network allows:
 
 **From PyPI** (recommended — stable releases):
 
 ```bash
 uv tool install kb-recall
+# or, with pipx:
+#   pipx install kb-recall
 cd ~/your-project
-recall setup
+recall setup -p claude
 ```
 
 **From GitHub** (latest `main`, or if PyPI is blocked on your network):
@@ -85,9 +92,9 @@ recall setup
 uv tool install git+https://github.com/nguyenquangsang/kb-recall.git
 ```
 
-Either way, `uv tool install` installs into its own isolated environment and exposes a single `recall` command (`~/.local/bin/recall` by default) — no manual `git clone` needed for the GitHub source either. This matters beyond convenience: the `UserPromptSubmit` hook runs `recall prompt`, and because the tool's environment is isolated and self-contained, that command reaches the right interpreter no matter which project's venv (if any) happens to be active in the calling shell — unlike invoking a bare `python3 /path/to/prompt_submit.py`, which only works when the ambient `python3` happens to be kb-recall's own interpreter.
+Either way, the CLI installs into its own isolated environment and exposes a single `recall` command (`~/.local/bin/recall` by default) — no manual `git clone` needed for the GitHub source either. This matters beyond convenience: the `UserPromptSubmit` hook runs `recall prompt`, and because the tool's environment is isolated and self-contained, that command reaches the right interpreter no matter which project's venv (if any) happens to be active in the calling shell — unlike invoking a bare `python3 /path/to/prompt_submit.py`, which only works when the ambient `python3` happens to be kb-recall's own interpreter.
 
-`recall setup` writes the hook using the **absolute path** to that executable rather than the bare name. Both harnesses (Claude Code and Copilot) spawn hook commands through a shell that does not source your interactive rc (`.zshrc`), so a bare `recall` — which resolves only because `.zshrc` puts `~/.local/bin` on `PATH` — would match nothing there and the hook would fail silently, injecting no context and printing no error.
+`recall setup -p claude` writes the hook using the **absolute path** to that executable rather than the bare name. Both harnesses (Claude Code and Copilot) spawn hook commands through a shell that does not source your interactive rc (`.zshrc`), so a bare `recall` — which resolves only because `.zshrc` puts `~/.local/bin` on `PATH` — would match nothing there and the hook would fail silently, injecting no context and printing no error.
 
 Verify:
 
@@ -107,16 +114,42 @@ Run setup from your project directory (one-time per project):
 
 ```bash
 cd ~/your-project
-recall setup
+recall setup -p claude
 ```
 
 This registers the MCP server, adds the project to config, writes `CLAUDE.local.md` (gitignored, per-developer — not the team-shared `CLAUDE.md`), and installs the hook. Reload your client after. See [Setup checklist](#setup-checklist) for what each step does.
 
-`recall setup` detects the target project from the current working directory (`Path.cwd()`) — always `cd` into the target project first.
+Setup detects the target project from the current working directory (`Path.cwd()`) — always `cd` into the target project first.
+
+## Troubleshooting
+
+Run `recall doctor` for a self-diagnostic — it prints a checklist and tells you what to fix:
+
+```text
+$ recall doctor
+✅ Python 3.12.1
+✅ recall v0.3.0 @ ~/.local/bin/recall
+✅ Claude Code @ /usr/local/bin/claude
+✅ project registered (/path/to/your-project)
+✅ KB initialized (2 feature(s))
+✅ Claude UserPromptSubmit hook
+✅ Copilot .mcp.json
+✅ Copilot hooks (.github/hooks/recall.json)
+✅ Copilot instructions (.github/copilot-instructions.md)
+```
+
+Every `❌` line carries a `→` hint naming the fix. The common ones:
+
+- **Python too old.** kb-recall needs Python 3.10+. `uv tool install` fetches its own Python automatically, so a system Python 3.9 doesn't block it — this only matters for `pipx`, which uses your ambient Python: run `pipx install --python python3.10 kb-recall`, or upgrade Python first.
+- **`recall: command not found`.** The install puts `recall` in `~/.local/bin` (macOS/Linux) or `%USERPROFILE%\.local\bin` (Windows), which may not be on your `PATH`. Run `uv tool update-shell` and open a new terminal — or, for the current Windows session:
+  ```powershell
+  $env:Path = "$env:USERPROFILE\.local\bin;$env:Path"
+  ```
+- **No tools appear in the agent after a successful install.** Two usual causes: the `recall` on your `PATH` is an older install than the one you upgraded (`doctor` prints the version it is actually running), or this project is missing its hook/config files (`doctor` lists each one and its fix).
 
 ## Configuration
 
-`~/.recall-mcp/config.json` is created automatically by `recall setup`. To add more projects manually:
+`~/.recall-mcp/config.json` is created automatically by setup. To add more projects manually:
 
 ```json
 {
@@ -269,7 +302,7 @@ recall sync-commands
 
 Reload Claude Code. If you're working from a clone of this repo (editable install), `recall sync-commands` symlinks `commands/*.md` into `~/.claude/commands/recall/` — edit the source files and changes take effect immediately (no reload needed). Falls back to copying if your filesystem doesn't support symlinks; re-run `recall sync-commands` after editing in that case.
 
-On Copilot the same eight exist as Agent Skills, invoked without the colon — `/recall-load`, `/recall-save`, `/recall-list`, `/recall-init`, `/recall-miss`, `/recall-link-feature`, `/recall-compact`, `/recall-tidy` — and the argument is passed after the command rather than interpolated: `/recall-save webhook ordering note`. Installed by `recall setup --platform copilot`; see [GitHub Copilot](#github-copilot).
+On Copilot the same eight exist as Agent Skills, invoked without the colon — `/recall-load`, `/recall-save`, `/recall-list`, `/recall-init`, `/recall-miss`, `/recall-link-feature`, `/recall-compact`, `/recall-tidy` — and the argument is passed after the command rather than interpolated: `/recall-save webhook ordering note`. Installed by `recall setup -p copilot`; see [GitHub Copilot](#github-copilot).
 
 ## Version history
 
@@ -297,12 +330,12 @@ uv sync                 # install deps
 uv run recall-server    # run locally (stdio mode)
 ```
 
-Feature KB templates live in `kb_recall/templates/` — edit them to change what `init_feature` generates. Eight files: `feature-README.md` and `feature-memories.md` (the per-feature KB), `features-index.md` (the project index), `claude-md-snippet.md` (the CLAUDE.md section shown when a project isn't configured), `claude-command.md` (the standard every `commands/*.md` file follows), `copilot-skill.md` (the standard every `skills/*/SKILL.md` file follows), `copilot-instructions.md` (the instructions file `recall setup --platform copilot` writes), and `claude-settings.json`.
+Feature KB templates live in `kb_recall/templates/` — edit them to change what `init_feature` generates. Eight files: `feature-README.md` and `feature-memories.md` (the per-feature KB), `features-index.md` (the project index), `claude-md-snippet.md` (the CLAUDE.md section shown when a project isn't configured), `claude-command.md` (the standard every `commands/*.md` file follows), `copilot-skill.md` (the standard every `skills/*/SKILL.md` file follows), `copilot-instructions.md` (the instructions file `recall setup -p copilot` writes), and `claude-settings.json`.
 
 Tests and lint:
 
 ```bash
-uv run pytest        # 458 tests: hook helpers, CLI, server tools, prompt_submit,
+uv run pytest        # 460 tests: hook helpers, CLI, server tools, prompt_submit,
                      # commands + skills contracts, Copilot adapter, smoke scorer,
                      # docstring contract, end-to-end lifecycle, stdio smoke,
                      # text-encoding guard
@@ -313,11 +346,11 @@ Repo-local agents live in `.github/agents/` — VS Code loads every `.md` file i
 
 ## Setup checklist
 
-Several things must be in place for your agent to reliably use kb-recall. `recall setup` automates all of them — run it once per project.
+Several things must be in place for your agent to reliably use kb-recall. `recall setup -p claude` automates all of them — run it once per project.
 
 ```bash
 cd ~/your-project
-recall setup
+recall setup -p claude
 ```
 
 ### What setup does
@@ -343,7 +376,7 @@ This is the only hook kb-recall installs. (An earlier design also used a `PreCom
 
 Reload Claude Code after setup.
 
-`recall setup --platform copilot` runs only steps 2, 3 and 5b (its own MCP config, hooks and Agent Skills) and never touches `~/.claude/`; `--platform all` runs both. Copilot details: [GitHub Copilot](#github-copilot).
+`recall setup -p copilot` runs only steps 2, 3 and 5b (its own MCP config, hooks and Agent Skills) and never touches `~/.claude/`, and `recall setup -p claude` writes no Copilot files — neither invocation configures the other client. Copilot details: [GitHub Copilot](#github-copilot).
 
 ---
 
@@ -353,7 +386,7 @@ kb-recall runs on GitHub Copilot in VS Code alongside Claude Code. Both clients 
 
 ```bash
 cd ~/your-project
-recall setup --platform copilot    # or --platform all, for both clients
+recall setup -p copilot
 ```
 
 Reload VS Code and start a **new** chat session — the auto-load hook runs at session start, so a session that is already open will not see it.
@@ -365,7 +398,7 @@ Reload VS Code and start a **new** chat session — the auto-load hook runs at s
 | Instructions             | `.github/copilot-instructions.md` | skipped when `CLAUDE.local.md` already carries the rules |
 | Agent Skills ×8          | `~/.copilot/skills/` (symlinked)  | user-scope, mirroring `~/.claude/commands/recall/`       |
 
-The two machine-specific files are gitignored because they hold absolute paths — each developer runs `recall setup --platform copilot` once, exactly as they already run `recall setup` for Claude Code.
+The two machine-specific files are gitignored because they hold absolute paths — each developer runs `recall setup -p copilot` once, exactly as the Claude Code setup above runs `recall setup -p claude`.
 
 > **Enable `.mcp.json` first.** VS Code Stable defaults `chat.mcp.workspaceRootConfig.enabled` to `false`, which makes it ignore `.mcp.json` **silently** — the agent has no tools and reports no error. Turn it on in Settings, or add the server through the MCP UI.
 
@@ -426,7 +459,7 @@ _Audited against the source on 2026-10-06. Checkboxes describe what ships today,
 
 ### 🚀 DX & Slash Commands (Short-term)
 
-- [x] **CLI Setup:** `recall setup` automates the installation steps — MCP server registration, project config, issue-tracker preference, hook install, slash-command sync.
+- [x] **CLI Setup:** `recall setup -p <platform>` automates the installation steps — MCP server registration, project config, issue-tracker preference, hook install, slash-command sync.
 - [x] **Cross-project resolution:** Auto-detect and resolve ambiguous feature slugs, disambiguating by project when a slug exists in more than one, with a fuzzy (`difflib`, ≥0.8) fallback when an exact match isn't found.
 - [x] **`/recall:init` auto-slugify:** Derives the slug from the branch segment, pre-fills the ticket ID from a key-shaped pattern in the branch name, and defaults the username from `git config user.name`. Every command takes an optional slug and auto-detects from the branch otherwise.
 - [ ] **Single-section update command:** Rewrite one named README section without the model composing the replacement text first. `update_readme` already writes a section, but it takes the finished content as an argument — there is no command that takes "section X, change it this way". `/recall:tidy` rewrites sections but in bulk and for compaction, not for a targeted edit.
@@ -452,4 +485,4 @@ _Audited against the source on 2026-10-06. Checkboxes describe what ships today,
 
 - [ ] **Auto Git Remote Sync:** Background `git pull/push` on load/save — keeping team READMEs synced while keeping personal `memories-{user}.md` conflict-free.
 - [ ] **Provenance tracking:** Add `source` field (PR, Jira ticket, manual) to memories and misses.
-- [x] **GitHub Copilot support:** Agent Skills (all 8 skills), `sessionStart` auto-load and `postToolUse` per-turn reminders, with `.mcp.json` and `.github/hooks/recall.json` generated by `recall setup --platform copilot`. Three Claude-only gaps remain by design and are documented in [GitHub Copilot](#github-copilot): the idle-gap guard, mid-session branch reload, and prompt-time injection.
+- [x] **GitHub Copilot support:** Agent Skills (all 8 skills), `sessionStart` auto-load and `postToolUse` per-turn reminders, with `.mcp.json` and `.github/hooks/recall.json` generated by `recall setup -p copilot`. Three Claude-only gaps remain by design and are documented in [GitHub Copilot](#github-copilot): the idle-gap guard, mid-session branch reload, and prompt-time injection.

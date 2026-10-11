@@ -72,7 +72,7 @@ copilot -p <prompt> --additional-mcp-config @<file> --allow-all-tools -s
 
 `--additional-mcp-config` is not optional. A bare `copilot mcp list` in this
 repo lists only the builtin servers, so the workspace `.mcp.json` that
-`recall setup --platform copilot` writes is invisible without it — a config
+`recall setup -p copilot` writes is invisible without it — a config
 that works in VS Code is silently inert here. `--allow-all-tools` is likewise
 required, since non-interactive mode refuses to start tool calls without it.
 

@@ -37,7 +37,7 @@ kb-recall gives Claude a persistent knowledge base — organized by feature, not
 
 ### Step 1 — Install the CLI
 
-Requires [uv](https://docs.astral.sh/uv/). Two install sources — pick whichever your network allows:
+Requires [uv](https://docs.astral.sh/uv/) — or [pipx](https://pipx.pypa.io/stable/), which works identically (`pipx install kb-recall`). Two install sources — pick whichever your network allows:
 
 ```bash
 # From PyPI (recommended — stable releases)
@@ -47,7 +47,7 @@ uv tool install kb-recall
 uv tool install git+https://github.com/nguyenquangsang/kb-recall.git
 ```
 
-Either way, `uv tool install` installs into its own isolated environment and exposes a `recall` command on your PATH. Verify:
+Either way, the install lands in its own isolated environment and exposes a `recall` command on your PATH. Verify:
 
 ```bash
 recall --help
@@ -65,10 +65,13 @@ uv tool install --editable .
 
 ```bash
 cd ~/your-project
-recall setup
+recall setup -p claude
 ```
 
 ![recall setup registers the MCP server, adds the project to config, writes CLAUDE.local.md, and installs the hook](images/1-setup.gif)
+
+> The recording above predates the required `-p` flag and shows a bare `recall setup`,
+> which is now rejected — the command to run is `recall setup -p claude`.
 
 This does five things in one pass:
 
@@ -78,12 +81,14 @@ This does five things in one pass:
 4. **Install hooks** — adds the `UserPromptSubmit` hook (the `recall prompt` command, written as an absolute path — see [Installation](README.md#installation)) to `~/.claude/settings.json`. For Claude Code this is the only hook kb-recall installs — it injects the feature index, branch-based KB suggestion, and the turn-counter save reminder on every prompt. (An earlier design also used a `PreCompact` hook for a pre-compaction save reminder; that was dropped — a turn-counter reminder via `UserPromptSubmit` covers the same need without the extra hook.)
 5. **Sync slash commands** — same as running `recall sync-commands` (see below).
 
-Reload Claude Code after setup. Every prompt will include the feature index and a KB suggestion if the current branch matches a known feature slug.
+`-p` is required because setup writes into one client's configuration, so which client it
+is should never be inferred. Reload Claude Code after setup. Every prompt will include the
+feature index and a KB suggestion if the current branch matches a known feature slug.
 
-Using GitHub Copilot too? `recall setup --platform copilot` (or `--platform all`) sets
-up the same KB store for Copilot — writing `.mcp.json` and `.github/hooks/recall.json`
-instead of touching `~/.claude/`. Full details in the README's
-[GitHub Copilot](README.md#github-copilot) section.
+Using GitHub Copilot too? `recall setup -p copilot` sets up the same KB store for Copilot
+— writing `.mcp.json` and `.github/hooks/recall.json` instead of touching `~/.claude/`.
+Setup is idempotent, so running it once per client is not a re-do of work. Full details in
+the README's [GitHub Copilot](README.md#github-copilot) section.
 
 ---
 
@@ -249,7 +254,7 @@ Slash commands wrap the most common workflows so you don't need to type out tool
 
 ### Install
 
-Already done if you ran `recall setup` (Step 5 of setup syncs commands). To re-sync after pulling command changes:
+Already done if you ran `recall setup -p claude` (Step 5 of setup syncs commands). To re-sync after pulling command changes:
 
 ```bash
 recall sync-commands
@@ -539,7 +544,7 @@ If the hook is registered but never fires, check the command it was written with
 grep -A3 UserPromptSubmit ~/.claude/settings.json
 ```
 
-It should be an absolute path (`/Users/you/.local/bin/recall prompt`), not a bare `recall prompt`. Claude Code spawns hook commands through a shell that does not source `.zshrc`, so a bare name resolves only if `~/.local/bin` is on the PATH that shell inherits — otherwise the hook fails silently, injecting nothing and printing no error. Re-run `recall setup` to rewrite it as an absolute path, or confirm the absolute path resolves:
+It should be an absolute path (`/Users/you/.local/bin/recall prompt`), not a bare `recall prompt`. Claude Code spawns hook commands through a shell that does not source `.zshrc`, so a bare name resolves only if `~/.local/bin` is on the PATH that shell inherits — otherwise the hook fails silently, injecting nothing and printing no error. Re-run `recall setup -p claude` to rewrite it as an absolute path, or confirm the absolute path resolves:
 
 ```bash
 /path/shown/in/settings.json

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """recall CLI — setup and management commands."""
 
+import importlib.metadata
 import json
 import os
 import re
@@ -119,6 +120,20 @@ def _is_recall_prompt(command: str) -> bool:
     return len(parts) == 2 and parts[1] == "prompt" and Path(parts[0]).name == "recall"
 
 
+def _installed_version() -> str | None:
+    """Version of the running `kb-recall` distribution, or None if not installed.
+
+    `importlib.metadata` reads the metadata of the environment this process is
+    running in — which is exactly the `recall` the user actually invoked. Printing
+    it is how `doctor` exposes a stale binary: if the user believes they upgraded
+    to 0.2.1 but this reports 0.2.0, the `recall` on PATH is an older install.
+    """
+    try:
+        return importlib.metadata.version("kb-recall")
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def cmd_sync_commands(_args: list[str] | None = None) -> int:
     dest_dir = Path.home() / ".claude" / "commands" / "recall"
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -171,7 +186,144 @@ def cmd_block_idle(args: list[str]) -> int:
     return 0
 
 
-PLATFORMS = ("claude", "copilot", "all")
+def _claude_hook_installed() -> bool:
+    """True if ~/.claude/settings.json carries a UserPromptSubmit hook for recall.
+
+    Mirrors the read-only detection half of `cmd_setup` (Step 4) without writing:
+    an entry is recall's if any of its hook commands matches `_is_recall_prompt`.
+    """
+    settings = _read_json_dict(CLAUDE_SETTINGS)
+    if not isinstance(settings, dict):
+        return False
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return False
+    submit = hooks.get("UserPromptSubmit")
+    if not isinstance(submit, list):
+        return False
+    for entry in submit:
+        if not isinstance(entry, dict):
+            continue
+        for hook in entry.get("hooks") or []:
+            if not isinstance(hook, dict):
+                continue
+            command = hook.get("command")
+            if isinstance(command, str) and _is_recall_prompt(command):
+                return True
+    return False
+
+
+def cmd_doctor(_args: list[str] | None = None) -> int:
+    """Print a health checklist for the recall install; exit 1 if anything is red.
+
+    Read-only — never writes. Reports Python, the `recall` on PATH (with the
+    running version, so a stale binary is visible), the Claude Code client,
+    whether this project is registered and has a KB, and the Claude/Copilot
+    config files.
+    """
+    problems = 0
+
+    def report(ok: bool, label: str, hint: str = "") -> None:
+        nonlocal problems
+        if not ok:
+            problems += 1
+        print(f"{'✅' if ok else '❌'} {label}")
+        if hint and not ok:
+            print(f"   → {hint}")
+
+    # --- Environment ---
+    py = sys.version_info
+    report(
+        py >= (3, 10),
+        f"Python {py.major}.{py.minor}.{py.micro}",
+        "Install Python 3.10+",
+    )
+
+    which = shutil.which("recall")
+    version = _installed_version()
+    if which is None:
+        report(
+            False,
+            "recall on PATH",
+            "Run `uv tool update-shell`, then open a new terminal",
+        )
+    else:
+        version_text = f"v{version}" if version else "version unknown"
+        report(True, f"recall {version_text} @ {which}")
+        running = Path(sys.argv[0]).resolve()
+        resolved = Path(which).resolve()
+        if resolved != running:
+            print(
+                f"   ⚠ PATH resolves `recall` to {resolved}, but the running command "
+                f"is {running} — a duplicate install may shadow the upgraded one."
+            )
+
+    claude_cli = _claude_cli()
+    if claude_cli is None:
+        report(False, "Claude Code", "Install the Claude Code CLI, or add it to PATH")
+    else:
+        report(True, f"Claude Code @ {claude_cli}")
+
+    # --- Project + KB ---
+    cwd = Path.cwd().resolve()
+    config = _read_json_dict(KB_ROOT / "config.json") or {}
+    projects = config.get("projects")
+    registered = isinstance(projects, list) and str(cwd) in projects
+    report(
+        registered,
+        f"project registered ({cwd})",
+        "Run `recall setup -p claude` (or `-p copilot`) from this project",
+    )
+
+    features_md = KB_ROOT / cwd.name / "features.md"
+    if features_md.exists():
+        rows = features_md.read_text(encoding="utf-8").splitlines()
+        n_features = (
+            sum(
+                1
+                for line in rows
+                if line.startswith("| ") and not line.startswith("|-")
+            )
+            - 1
+        )
+        n_features = max(0, n_features)
+        report(True, f"KB initialized ({n_features} feature(s))")
+    else:
+        report(
+            False, "KB initialized", "Run `/recall:init` (or the init_feature MCP tool)"
+        )
+
+    # --- Claude ---
+    report(
+        _claude_hook_installed(),
+        "Claude UserPromptSubmit hook",
+        "Run `recall setup -p claude`",
+    )
+
+    # --- Copilot ---
+    mcp = _read_json_dict(cwd / ".mcp.json")
+    mcp_servers = mcp.get("mcpServers") if isinstance(mcp, dict) else None
+    mcp_ok = isinstance(mcp_servers, dict) and "recall" in mcp_servers
+    report(mcp_ok, "Copilot .mcp.json", "Run `recall setup -p copilot`")
+
+    hooks_file = cwd / ".github" / "hooks" / "recall.json"
+    report(
+        hooks_file.exists(),
+        "Copilot hooks (.github/hooks/recall.json)",
+        "Run `recall setup -p copilot`",
+    )
+
+    instructions = cwd / ".github" / "copilot-instructions.md"
+    report(
+        instructions.exists(),
+        "Copilot instructions (.github/copilot-instructions.md)",
+        "Run `recall setup -p copilot`",
+    )
+
+    return 1 if problems else 0
+
+
+PLATFORMS = ("claude", "copilot")
 COPILOT_HOOK_SCRIPT = "recall-copilot-hook"
 COPILOT_HOOK_TIMEOUT_SEC = 30
 COPILOT_POST_TOOL_TIMEOUT_SEC = 15
@@ -181,29 +333,32 @@ COPILOT_SKILLS_DIR = Path.home() / ".copilot" / "skills"
 def _parse_platform(args: list[str]) -> str | None:
     """Return the requested platform, or None when the invocation is rejected.
 
-    Defaults to "claude": `recall setup` gained a flag, it did not change meaning,
-    so every existing invocation keeps the behaviour it had.
+    The flag is required. It decides which platform's files setup writes, so an
+    invocation that names no platform has no defensible answer: the old implicit
+    `claude` default meant `recall setup` in a Copilot-only project registered the
+    MCP server, installed the hook and symlinked the commands into ~/.claude/,
+    then reported success. Rejecting the flagless form leaves that choice with the
+    user, exactly as the bad-value case below refuses to guess one.
+
+    Only the space form is accepted. `--platform` (the long spelling this
+    replaced) and `-p=copilot` are unrecognized arguments rather than aliases: two
+    spellings of one flag would have to be kept in sync by hand, and whoever types
+    either of them believes they selected a platform when they did not.
 
     Every argument this does not recognize is rejected, not ignored. Ignoring one
     made a typo indistinguishable from the default: `recall setup --platfrom
     copilot` wrote Claude config to ~/.claude/ and reported success, which is the
-    exact failure the missing-value case below already refuses to risk.
+    exact failure the missing-value case already refuses to risk.
     """
-    platform = "claude"
+    platform: str | None = None
     i = 0
     while i < len(args):
-        arg = args[i]
-        if arg == "--platform":
-            if i + 1 >= len(args):
-                return None  # flag with no value — reject rather than guess
-            platform = args[i + 1]
-            i += 2
-            continue
-        if arg.startswith("--platform="):
-            platform = arg.split("=", 1)[1]
-        else:
+        if args[i] != "-p":
             return None  # unrecognized argument — reject rather than ignore
-        i += 1
+        if i + 1 >= len(args):
+            return None  # flag with no value — reject rather than guess
+        platform = args[i + 1]
+        i += 2
     return platform if platform in PLATFORMS else None
 
 
@@ -309,7 +464,7 @@ def _write_copilot_instructions(project_dir: Path) -> None:
     This file carries the Copilot-specific corrections — no index injection, so
     `list_features()` is needed; per-tool-call reminders; no idle-gap guard — that the
     Claude-side snippet omits or states differently. It is therefore written even when
-    `CLAUDE.local.md` already carries recall-mcp: `--platform all` must not leave Copilot
+    `CLAUDE.local.md` already carries recall-mcp: `-p copilot` must not leave Copilot
     holding only the Claude-flavoured guidance. A file that already exists without the
     recall-mcp marker is the team's own instructions — append to it, never overwrite.
     """
@@ -365,7 +520,7 @@ def _write_copilot_skills() -> None:
         print(f"  ✓ Copilot skills (symlinked): {', '.join(linked)}")
     if copied:
         print(f"  ~ Copilot skills (copied, symlink unavailable): {', '.join(copied)}")
-        print("    Re-run 'recall setup --platform copilot' after updating skills.")
+        print("    Re-run 'recall setup -p copilot' after updating skills.")
 
 
 def _setup_copilot(project_dir: Path) -> None:
@@ -431,26 +586,32 @@ def _setup_copilot(project_dir: Path) -> None:
 def cmd_setup(args: list[str]) -> int:
     platform = _parse_platform(args)
     if platform is None:
-        # One message for both rejections (a bad value and an unrecognized argument)
-        # because the caller cannot tell them apart from the exit code alone, and the
-        # usage line names every accepted value either way.
-        print(
-            f"  Invalid arguments. Expected --platform to be one of: {', '.join(PLATFORMS)}.",
-            file=sys.stderr,
-        )
-        print(
-            f"  Usage: recall setup [--platform {'|'.join(PLATFORMS)}]",
-            file=sys.stderr,
-        )
+        # An empty argv is by construction "no -p at all" — the one shape worth its
+        # own wording, because it is what every pre-0.3.0 instruction told users to
+        # run. Everything else is a bad value or a stray token, and those are
+        # deliberately reported alike: the caller cannot tell them apart from the
+        # exit code alone, and the usage line names every accepted value either way.
+        if not args:
+            print("  Missing required -p.", file=sys.stderr)
+        else:
+            print(
+                f"  Invalid arguments. Expected -p to be one of: {', '.join(PLATFORMS)}.",
+                file=sys.stderr,
+            )
+        print(f"  Usage: recall setup -p {'|'.join(PLATFORMS)}", file=sys.stderr)
         return 1
 
-    do_claude = platform in ("claude", "all")
-    do_copilot = platform in ("copilot", "all")
+    # Exactly one is true, now that `all` is gone. The pair is kept rather than
+    # folded into an if/else because the shared steps below (project config, issue
+    # tracker) interleave with the platform-specific blocks, so branching around
+    # the whole body would duplicate both shared halves to no effect.
+    do_claude = platform == "claude"
+    do_copilot = platform == "copilot"
 
     project_dir = Path.cwd().resolve()
 
-    # Printed unconditionally: with --platform all, which files were written where
-    # is the difference between "it worked" and "I clobbered something".
+    # Printed unconditionally: with two possible platforms, which files were written
+    # where is the difference between "it worked" and "I configured the wrong client".
     print(f"\nSetting up recall-mcp for: {project_dir}")
     print(f"Platform: {platform}\n")
 
@@ -655,12 +816,12 @@ def _print_usage() -> None:
     print("Usage: recall <command>")
     print()
     print("Commands:")
-    print("  setup [--platform claude|copilot|all]")
+    print("  setup -p claude|copilot")
     print(
         "                  Register MCP server, configure project, install hooks, sync commands"
     )
     print(
-        "                  (default: claude — copilot writes .mcp.json + .github/, never ~/.claude/)"
+        "                  (-p is required — copilot writes .mcp.json + .github/, never ~/.claude/)"
     )
     print("  sync-commands   Re-sync slash commands to ~/.claude/commands/recall/")
     print(
@@ -669,6 +830,7 @@ def _print_usage() -> None:
     print(
         "  block-idle <true|false>   Enable/disable the idle-gap hard-block (warn-only reminders stay on)"
     )
+    print("  doctor           Diagnose install: Python, recall on PATH, hooks, KB")
 
 
 def main() -> None:
@@ -693,6 +855,8 @@ def main() -> None:
         sys.exit(cmd_prompt(args[1:]))
     elif command == "block-idle":
         sys.exit(cmd_block_idle(args[1:]))
+    elif command == "doctor":
+        sys.exit(cmd_doctor(args[1:]))
     else:
         print(f"Unknown command: {command}", file=sys.stderr)
         print("Run 'recall --help' for usage.", file=sys.stderr)

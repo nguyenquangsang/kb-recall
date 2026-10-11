@@ -376,10 +376,10 @@ def main() -> None:
             print(f"[recall-mcp] Project '{cwd.name}' is not configured.")
             print(
                 "ASK the user: \"This project isn't set up for recall-mcp yet. "
-                'Run `recall setup` now?"'
+                'Run `recall setup -p claude` now?"'
             )
             print(
-                "If yes: run `recall setup` via Bash, then report the output and tell the user to reload Claude Code to activate it."
+                "If yes: run `recall setup -p claude` via Bash, then report the output and tell the user to reload Claude Code to activate it."
             )
             print("If no: do nothing.")
 
