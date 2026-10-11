@@ -1,5 +1,6 @@
 .vscode
-.claude
+.claude/settings.json
+.claude/settings.local.json
 CLAUDE.local.md
 __pycache__/
 

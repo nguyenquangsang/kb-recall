@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -201,7 +202,7 @@ class TestCmdSetup:
 
     def test_survives_missing_claude_cli(self, project, monkeypatch, capsys):
         monkeypatch.setattr(cli, "_claude_cli", lambda: None)
-        assert cli.cmd_setup([]) == 0
+        assert cli.cmd_setup(["-p", "claude"]) == 0
         assert "Could not find the `claude` CLI" in capsys.readouterr().out
         cfg = json.loads((cli.KB_ROOT / "config.json").read_text(encoding="utf-8"))
         assert str(project) in cfg["projects"]
@@ -215,7 +216,7 @@ class TestCmdSetup:
 
         monkeypatch.setattr(cli, "_claude_cli", lambda: "/nope/claude")
         monkeypatch.setattr(cli.subprocess, "run", boom)
-        assert cli.cmd_setup([]) == 0
+        assert cli.cmd_setup(["-p", "claude"]) == 0
         out = capsys.readouterr().out
         assert "Could not auto-register" in out
         assert "/nope/claude mcp add --scope user recall" in out
@@ -238,7 +239,7 @@ class TestCmdSetup:
         monkeypatch.setattr(cli, "_server_command", lambda: ["/bin/recall-server"])
         monkeypatch.setattr(cli.subprocess, "run", record)
 
-        assert cli.cmd_setup([]) == 0
+        assert cli.cmd_setup(["-p", "claude"]) == 0
         assert calls[0] == [
             "/bin/claude",
             "mcp",
@@ -260,26 +261,29 @@ class TestCmdSetup:
 
 
 class TestParsePlatform:
-    def test_defaults_to_claude(self):
-        """`setup` gained a flag; it did not change meaning. Every existing
-        invocation — and every doc that says `recall setup` — keeps the behaviour
-        it had before, so an existing user is never surprised by new files."""
-        assert cli._parse_platform([]) == "claude"
+    def test_rejects_a_missing_platform(self):
+        """No fallback to "claude": the flag decides which platform's files are
+        written, so an invocation that names none has no defensible answer. The
+        old default meant `recall setup` in a Copilot-only project registered the
+        MCP server and installed hooks into ~/.claude/ while reporting success."""
+        assert cli._parse_platform([]) is None
 
     @pytest.mark.parametrize("platform", cli.PLATFORMS)
     def test_accepts_every_platform(self, platform):
-        assert cli._parse_platform(["--platform", platform]) == platform
-
-    def test_accepts_the_equals_form(self):
-        assert cli._parse_platform(["--platform=copilot"]) == "copilot"
+        assert cli._parse_platform(["-p", platform]) == platform
 
     @pytest.mark.parametrize(
         "args",
         [
-            ["--platform"],  # flag with no value — reject, do not guess a platform
-            ["--platform", "claude-code"],
-            ["--platform="],
-            ["--platform", "CLAUDE"],  # case-sensitive deliberately
+            ["-p"],  # flag with no value — reject, do not guess a platform
+            ["-p", "claude-code"],
+            ["-p", ""],
+            ["-p", "CLAUDE"],  # case-sensitive deliberately
+            # `all` was a value until 0.3.0 removed it. It gets no migration
+            # special-case: running setup once per platform replaces it, and a
+            # bespoke message would be a second thing to keep in sync with the
+            # flag this same release shortened.
+            ["-p", "all"],
         ],
     )
     def test_rejects_missing_or_unknown_values(self, args):
@@ -291,23 +295,27 @@ class TestParsePlatform:
         "args",
         [
             ["--platfrom", "copilot"],  # transposed flag name
-            ["-p", "copilot"],
-            ["--platform", "copilot", "--verbose"],  # valid flag, stray extra
-            ["copilot"],
+            ["--platform", "copilot"],  # long form — removed in 0.3.0, not aliased
+            ["--platform=copilot"],
+            ["-p=copilot"],  # equals form — space form only
+            ["-p", "copilot", "--verbose"],  # valid flag, stray extra
+            ["copilot"],  # value with no flag
         ],
     )
     def test_rejects_unrecognized_arguments(self, args):
-        """An argument that is not `--platform` is rejected, not skipped.
+        """An argument that is not `-p` is rejected, not skipped.
 
         Skipping it made a mistyped flag behave as if it had not been passed at
         all, so `--platfrom copilot` ran the default Claude setup — the same
         wrong-platform failure the bad-value case above already guards against.
+        `--platform` and `-p=` are rejections rather than aliases for the same
+        reason: whoever types one believes they selected a platform.
         """
         assert cli._parse_platform(args) is None
 
 
 class TestCmdSetupCopilot:
-    """`--platform copilot` is the one path that must never write into ~/.claude/.
+    """`-p copilot` is the one path that must never write into ~/.claude/.
 
     Claude and Copilot are configured independently on purpose: one platform's
     setup silently rewriting the other's live hook config is the failure this
@@ -354,7 +362,7 @@ class TestCmdSetupCopilot:
         return project_dir
 
     def test_writes_the_mcp_config(self, project, tmp_path):
-        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+        assert cli.cmd_setup(["-p", "copilot"]) == 0
 
         mcp_config = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))
         server = mcp_config["mcpServers"]["recall"]
@@ -365,7 +373,7 @@ class TestCmdSetupCopilot:
         """Both events in one file: the adapter dispatches on argv[1], and the
         payload's casing says nothing about which event fired, so the event name
         has to be baked into the command string."""
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         hooks = json.loads(
             (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
@@ -378,7 +386,7 @@ class TestCmdSetupCopilot:
         """The generator reads the matcher from the adapter rather than holding a
         second copy: an invalid regex makes the harness skip the whole hook entry
         SILENTLY, so a drifted copy would fail with no signal at all."""
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         entry = json.loads(
             (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
@@ -388,7 +396,7 @@ class TestCmdSetupCopilot:
 
     def test_never_touches_the_claude_tree(self, project, monkeypatch, capsys):
         monkeypatch.setattr(cli, "cmd_sync_commands", lambda *_: pytest.fail("called"))
-        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+        assert cli.cmd_setup(["-p", "copilot"]) == 0
 
         assert not cli.CLAUDE_SETTINGS.exists()
         assert not (project / "CLAUDE.local.md").exists()
@@ -399,16 +407,16 @@ class TestCmdSetupCopilot:
             raise AssertionError("the Copilot path must not probe for `claude`")
 
         monkeypatch.setattr(cli, "_claude_cli", boom)
-        assert cli.cmd_setup(["--platform", "copilot"]) == 0
+        assert cli.cmd_setup(["-p", "copilot"]) == 0
 
     def test_writes_the_instructions_file(self, project):
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
         assert "recall-mcp for copilot" in (
             project / ".github" / "copilot-instructions.md"
         ).read_text(encoding="utf-8")
 
     def test_writes_the_skills_to_user_scope(self, project):
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
         skill = cli.COPILOT_SKILLS_DIR / "recall-load" / "SKILL.md"
         assert skill.is_symlink() or skill.exists()
         assert "name: recall-load" in skill.read_text(encoding="utf-8")
@@ -416,7 +424,7 @@ class TestCmdSetupCopilot:
     def test_skills_are_user_scoped_not_project_scoped(self, project):
         """Skills serve every project, so they install once under ~/.copilot/
         (like Claude commands under ~/.claude/), not into the project."""
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
         assert not (project / ".github" / "skills").exists()
         assert (cli.COPILOT_SKILLS_DIR / "recall-load").exists()
 
@@ -425,7 +433,7 @@ class TestCmdSetupCopilot:
         script, so the config files are per-machine. The instructions file is not:
         it carries no machine-specific path and is the only channel Copilot reads
         from the repo, so it stays committable."""
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         ignored = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert ".mcp.json" in ignored
@@ -433,8 +441,8 @@ class TestCmdSetupCopilot:
         assert not any("copilot-instructions" in entry for entry in ignored)
 
     def test_rerunning_does_not_duplicate_gitignore_entries(self, project):
-        cli.cmd_setup(["--platform", "copilot"])
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         ignored = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
         assert ignored.count(".mcp.json") == 1
@@ -444,11 +452,12 @@ class TestCmdSetupCopilot:
     ):
         """The Claude snippet omits the Copilot-only corrections (no index
         injection, list_features needed), so Copilot still gets its own file even
-        when CLAUDE.local.md already has recall-mcp — `--platform all` must not
-        leave Copilot holding only the Claude-flavoured guidance."""
+        when CLAUDE.local.md already has recall-mcp — otherwise a project that
+        adopted Claude Code first would leave Copilot holding only the
+        Claude-flavoured guidance."""
         (project / "CLAUDE.local.md").write_text("recall-mcp\n", encoding="utf-8")
 
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         assert (project / ".github" / "copilot-instructions.md").exists()
         assert "recall-mcp for copilot" in (
@@ -469,7 +478,7 @@ class TestCmdSetupCopilot:
             encoding="utf-8",
         )
 
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         servers = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))[
             "mcpServers"
@@ -489,7 +498,7 @@ class TestCmdSetupCopilot:
             encoding="utf-8",
         )
 
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         text = (project / ".github" / "copilot-instructions.md").read_text(
             encoding="utf-8"
@@ -513,7 +522,7 @@ class TestCmdSetupCopilot:
             encoding="utf-8",
         )
 
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         hooks = json.loads(
             (project / ".github" / "hooks" / "recall.json").read_text(encoding="utf-8")
@@ -526,38 +535,54 @@ class TestCmdSetupCopilot:
         destroy whatever is in it."""
         (project / ".mcp.json").write_text("{ not valid json", encoding="utf-8")
 
-        cli.cmd_setup(["--platform", "copilot"])
+        cli.cmd_setup(["-p", "copilot"])
 
         assert (project / ".mcp.json").read_text(encoding="utf-8") == "{ not valid json"
         assert "isn't valid JSON" in capsys.readouterr().out
 
     def test_claude_platform_writes_no_copilot_files(self, project, monkeypatch):
         monkeypatch.setattr(cli, "_claude_cli", lambda: None)
-        assert cli.cmd_setup(["--platform", "claude"]) == 0
+        assert cli.cmd_setup(["-p", "claude"]) == 0
 
         assert not (project / ".mcp.json").exists()
         assert not (project / ".github").exists()
 
-    def test_all_writes_both(self, project, monkeypatch):
-        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
-        assert cli.cmd_setup(["--platform", "all"]) == 0
+    def test_all_value_is_gone_and_writes_nothing(self, project, capsys):
+        """`all` ran both setups until 0.3.0 removed it.
 
-        assert (project / "CLAUDE.local.md").exists()
-        assert (project / ".mcp.json").exists()
-        assert (project / ".github" / "hooks" / "recall.json").exists()
-        # Copilot still gets its own instructions file: the Claude snippet omits
-        # the Copilot-only corrections.
-        assert (project / ".github" / "copilot-instructions.md").exists()
+        It is now an invalid value like any other — no migration special-case, so
+        the assertion is on the generic message. Two runs, one per platform,
+        replace it: setup is idempotent, so the second pass is not a re-do.
+        """
+        assert cli.cmd_setup(["-p", "all"]) == 1
+
+        assert "Expected -p to be one of: claude, copilot" in capsys.readouterr().err
+        assert not (project / "CLAUDE.local.md").exists()
+        assert not (project / ".mcp.json").exists()
+        assert not (project / ".github").exists()
+        assert not (cli.KB_ROOT / "config.json").exists()
+
+    def test_missing_platform_exits_nonzero_and_writes_nothing(self, project, capsys):
+        """The bare `recall setup` of every pre-0.3.0 instruction is now an error."""
+        assert cli.cmd_setup([]) == 1
+
+        err = capsys.readouterr().err
+        assert "Missing required -p." in err
+        assert "Usage: recall setup -p claude|copilot" in err
+        assert not (project / "CLAUDE.local.md").exists()
+        assert not (project / ".mcp.json").exists()
+        assert not (project / ".github").exists()
+        assert not (cli.KB_ROOT / "config.json").exists()
 
     def test_invalid_platform_exits_nonzero_and_writes_nothing(self, project, capsys):
-        assert cli.cmd_setup(["--platform", "wsl"]) == 1
+        assert cli.cmd_setup(["-p", "wsl"]) == 1
 
-        assert "--platform claude|copilot|all" in capsys.readouterr().err
+        assert "Usage: recall setup -p claude|copilot" in capsys.readouterr().err
         assert not (project / ".mcp.json").exists()
         assert not (cli.KB_ROOT / "config.json").exists()
 
     def test_mistyped_flag_writes_nothing(self, project, capsys):
-        """`--platfrom` must abort, not fall through to the default platform.
+        """`--platfrom` must abort, not fall through to a platform.
 
         Before unknown arguments were rejected, this ran a full Claude setup —
         registering the MCP server and writing Claude files — while the user
@@ -565,7 +590,7 @@ class TestCmdSetupCopilot:
         """
         assert cli.cmd_setup(["--platfrom", "copilot"]) == 1
 
-        assert "--platform claude|copilot|all" in capsys.readouterr().err
+        assert "Usage: recall setup -p claude|copilot" in capsys.readouterr().err
         assert not (project / ".mcp.json").exists()
         assert not (project / ".github").exists()
         assert not (project / "CLAUDE.local.md").exists()
@@ -602,6 +627,114 @@ class TestHelpFlag:
 
         assert exc.value.code == 0
         assert "Usage: recall <command>" in capsys.readouterr().out
+
+
+@pytest.fixture
+def doctor_env(tmp_path, monkeypatch):
+    root = tmp_path / ".recall-mcp"
+    root.mkdir()
+    monkeypatch.setattr(cli, "KB_ROOT", root)
+    monkeypatch.setattr(cli, "CLAUDE_SETTINGS", tmp_path / ".claude" / "settings.json")
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+class TestCmdDoctor:
+    def _make_green(self, monkeypatch):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: "/fake/claude")
+        monkeypatch.setattr(
+            cli.shutil, "which", lambda name: sys.argv[0] if name == "recall" else None
+        )
+        (cli.KB_ROOT / "config.json").write_text(
+            json.dumps({"projects": [str(Path.cwd().resolve())]}), encoding="utf-8"
+        )
+        feat = cli.KB_ROOT / Path.cwd().name
+        feat.mkdir(parents=True)
+        feat.joinpath("features.md").write_text(
+            "| Feature | Slug |\n|---|---|\n| Demo | demo |\n", encoding="utf-8"
+        )
+        cli.CLAUDE_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        cli.CLAUDE_SETTINGS.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "UserPromptSubmit": [
+                            {"hooks": [{"type": "command", "command": "recall prompt"}]}
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (Path.cwd() / ".mcp.json").write_text(
+            json.dumps({"mcpServers": {"recall": {"type": "stdio", "command": "r"}}}),
+            encoding="utf-8",
+        )
+        hooks = Path.cwd() / ".github" / "hooks"
+        hooks.mkdir(parents=True)
+        hooks.joinpath("recall.json").write_text("{}", encoding="utf-8")
+        (Path.cwd() / ".github" / "copilot-instructions.md").write_text(
+            "recall-mcp", encoding="utf-8"
+        )
+
+    def test_all_green(self, doctor_env, monkeypatch, capsys):
+        self._make_green(monkeypatch)
+        assert cli.cmd_doctor([]) == 0
+        out = capsys.readouterr().out
+        assert "✅ Python" in out
+        assert "✅ recall" in out
+        assert "✅ KB initialized (1 feature(s))" in out
+        assert "✅ Claude UserPromptSubmit hook" in out
+        assert "✅ Copilot .mcp.json" in out
+
+    def test_missing_recall_on_path(self, doctor_env, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
+        monkeypatch.setattr(cli.shutil, "which", lambda _name: None)
+        assert cli.cmd_doctor([]) == 1
+        out = capsys.readouterr().out
+        assert "❌ recall on PATH" in out
+        assert "uv tool update-shell" in out
+
+    def test_stale_binary_warns(self, doctor_env, monkeypatch, capsys):
+        self._make_green(monkeypatch)
+        fake = doctor_env / "bin" / "recall"
+        fake.parent.mkdir()
+        fake.touch()
+        monkeypatch.setattr(
+            cli.shutil, "which", lambda name: str(fake) if name == "recall" else None
+        )
+        assert cli.cmd_doctor([]) == 0
+        assert "duplicate install may shadow" in capsys.readouterr().out
+
+    def test_project_not_registered(self, doctor_env, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
+        monkeypatch.setattr(
+            cli.shutil, "which", lambda name: sys.argv[0] if name == "recall" else None
+        )
+        (cli.KB_ROOT / "config.json").write_text(
+            json.dumps({"projects": ["/somewhere/else"]}), encoding="utf-8"
+        )
+        assert cli.cmd_doctor([]) == 1
+        out = capsys.readouterr().out
+        assert "❌ project registered" in out
+        assert "recall setup -p claude" in out
+
+    def test_claude_hook_absent(self, doctor_env, monkeypatch, capsys):
+        monkeypatch.setattr(cli, "_claude_cli", lambda: None)
+        monkeypatch.setattr(
+            cli.shutil, "which", lambda name: sys.argv[0] if name == "recall" else None
+        )
+        assert cli.cmd_doctor([]) == 1
+        assert "❌ Claude UserPromptSubmit hook" in capsys.readouterr().out
+
+    def test_kb_count(self, doctor_env, monkeypatch, capsys):
+        self._make_green(monkeypatch)
+        feat = cli.KB_ROOT / Path.cwd().name
+        feat.joinpath("features.md").write_text(
+            "| Feature | Slug |\n|---|---|\n| A | a |\n| B | b |\n", encoding="utf-8"
+        )
+        assert cli.cmd_doctor([]) == 0
+        assert "KB initialized (2 feature(s))" in capsys.readouterr().out
 
 
 class TestServerCommand:

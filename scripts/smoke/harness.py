@@ -264,7 +264,7 @@ def run_copilot(
 
     `--additional-mcp-config` is not optional here: a bare `copilot mcp list`
     in this repo shows only the builtin servers, so the workspace `.mcp.json`
-    that `recall setup` generates is invisible unless it is injected.
+    that `recall setup -p copilot` generates is invisible unless it is injected.
     `--allow-all-tools` is likewise required — non-interactive mode refuses to
     start tool calls without it.
     """

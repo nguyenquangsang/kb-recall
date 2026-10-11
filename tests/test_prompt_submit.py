@@ -443,7 +443,10 @@ class TestUnconfiguredProject:
     def test_shows_not_configured_hint(self, env_unconfigured):
         out = run_hook(env_unconfigured, "s1", cwd=env_unconfigured["other"])
         assert "is not configured" in out
-        assert "recall setup" in out
+        # The flag is part of the assertion, not decoration: `recall setup` on its
+        # own has been an error since 0.3.0, so a bare-name match would pass while
+        # the hook told the agent to run a command that exits 1.
+        assert "recall setup -p claude" in out
 
     def test_hint_does_not_repeat_for_new_session(self, env_unconfigured):
         run_hook(env_unconfigured, "s1", cwd=env_unconfigured["other"])

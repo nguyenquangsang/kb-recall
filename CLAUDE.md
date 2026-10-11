@@ -81,7 +81,7 @@ For any docstring approaching or exceeding ~1800 chars:
   Target comfortably under ~1900 chars through `Args:`. Small restorations drift back into the
   danger zone one edit at a time — check every time, not just once at the end.
 - **Cut what's duplicated in `templates/claude-md-snippet.md`** (copied into every consumer
-  project's CLAUDE.md by `recall setup`) before cutting anything that exists only in the
+  project's CLAUDE.md by `recall setup -p claude`) before cutting anything that exists only in the
   docstring — `grep` the template first.
 - **Non-redundant content that still doesn't fit** → move it to a **response footer** (text
   appended to the tool's return value on success) instead of deleting it — this channel isn't
@@ -105,12 +105,13 @@ Before anything else this session: check whether tools like `save_memory`,
   feature knowledge across sessions, and offer to set it up for them right now
   instead of asking them to open a terminal:
   - If `recall` is on PATH, offer to run it yourself:
-    `cd <this project's directory> && recall setup`.
+    `cd <this project's directory> && recall setup -p claude`.
     Only run it after the user agrees. Afterward, tell them to reload Claude Code —
     you cannot trigger that yourself.
   - If `recall` isn't found, tell the user kb-recall isn't installed here and give
-    them the one-line install: `uv tool install kb-recall`, then `recall setup` from
-    their project directory. Do not attempt to install it yourself.
+    them the one-line install: `uv tool install kb-recall` (or `pipx install kb-recall`), then
+    `recall setup -p claude` from their project directory. Do not attempt to
+    install it yourself.
   Then continue with the user's original request normally.
 - **Available** → follow the rules below.
 
@@ -162,6 +163,13 @@ Call `save_memory(slug="<slug>", content="<insight>")` the moment you observe an
 - An approach you tried and rejected (and why)
 - An architectural decision with non-obvious reasoning
 - A promising direction or improvement idea raised but not yet decided — tag `[idea]`, note where discussion left off
+
+**Which KB:** the slug the hook loaded for the current branch. A branch with no KB is a
+user decision point — offer link-to-existing / create-new / leave-unmapped, put no
+recommendation on any option, and ask; never write into another feature's KB because that
+is where the decision being replaced was recorded. Cross-KB origin belongs in the entry
+body as a source note ("reverses the decision recorded in KB `<slug>`"), never in the
+target.
 
 Entries can be multi-sentence. Skip routine implementation details.
 Write in English — KB content (memories and README sections) must be in English regardless of conversation language.

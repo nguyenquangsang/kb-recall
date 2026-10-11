@@ -6,6 +6,49 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The distribution name is `kb-recall`, the command is `recall`.
 
+## [0.3.0] — 2026-10-11
+
+### Added
+
+- **The generated project instructions now state which KB a save goes to.** Setup's save
+  guidance said `save_memory(slug="<slug>", ...)` without ever saying what that slug is, so
+  an agent on a branch with no KB of its own could write a decision into another feature's
+  KB — the one that happened to record the decision being replaced. The `## Saving` section
+  of both the Claude snippet and the Copilot instructions now names the branch's own KB as
+  the target and routes the no-KB case back to the user as a decision point, matching the
+  boundary the loading section already drew for *reading* a candidate KB.
+
+- **`recall doctor` — a read-only self-diagnostic.** It prints a checklist — Python
+  (>= 3.10), the `recall` on `PATH` (with the version it is actually running, so a stale
+  binary is visible), the Claude Code client, whether the current project is registered
+  and has a KB, and the Claude/Copilot hook + config files — and exits 1 if anything is
+  red, so a script can gate on it. A new README `Troubleshooting` section points users at
+  it, and `pipx install kb-recall` is documented as an alternative to `uv tool install`.
+
+### Changed
+
+- **`recall setup` now requires `-p claude` or `-p copilot`.** The flag used to be
+  `--platform` and defaulted to `claude`, so a bare `recall setup` in a project that only
+  wanted Copilot registered the MCP server, installed the `UserPromptSubmit` hook and
+  symlinked the slash commands into `~/.claude/` — writes into a client nobody asked to
+  configure, reported as success. Setup touches exactly one client's configuration, so the
+  command that names that client is no longer inferred: a bare `recall setup` prints
+  `Missing required -p.` and exits 1, having written nothing. The parser already refused to
+  guess a platform for a bad value; the omitted flag was the same wrong-platform failure in
+  a friendlier disguise.
+
+### Removed
+
+- **`--platform`, its `--platform=` equals form, and the `all` value.** `-p` is space-form
+  only and nothing else is aliased to it: whoever types a retired spelling believes they
+  selected a platform, which is exactly the failure the strict parser exists to prevent.
+  `all` ran both setups in one pass — setup is idempotent, so `recall setup -p claude`
+  followed by `recall setup -p copilot` replaces it with the same result.
+
+  **Upgrade the CLI first** (`uv tool upgrade kb-recall`) before following any older
+  instruction. A pre-0.2.0 `recall` ignores its arguments entirely: it would run the Claude
+  setup and print success while appearing to honour `-p`.
+
 ## [0.2.1] — 2026-10-08
 
 ### Added
@@ -128,6 +171,7 @@ The distribution name is `kb-recall`, the command is `recall`.
   `update_feature_index`, `report_miss`), the slash commands, the per-contributor
   journal model, and the idle-gap cost guard.
 
+[0.3.0]: https://github.com/nguyenquangsang/kb-recall/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/nguyenquangsang/kb-recall/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/nguyenquangsang/kb-recall/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nguyenquangsang/kb-recall/releases/tag/v0.1.0
